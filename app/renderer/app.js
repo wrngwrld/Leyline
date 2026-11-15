@@ -105,6 +105,19 @@ function scene() {
 
 // ---- pages ----------------------------------------------------------------
 
+const syncLabel = (p) => `${p.label[0].toUpperCase() + p.label.slice(1)}. Settings go first, so they are safe within seconds.`;
+const syncPct = (p) => (p.total ? Math.max(4, Math.round(((p.index - 0.5) / p.total) * 100)) : 4);
+
+/** Which hero card to show; the card is rebuilt only when this changes. */
+function heroMode() {
+  const { state } = data;
+  if (!state.configured) return 'setup';
+  if (state.status === 'syncing') return 'syncing';
+  if (state.status === 'error') return 'error';
+  if (state.running.length) return 'playing';
+  return state.lastSync ? 'ok' : 'ready';
+}
+
 function heroContent() {
   const { state, settings, history } = data;
   if (!state.configured) {
@@ -128,15 +141,15 @@ function heroContent() {
   }
   if (state.status === 'syncing') {
     const p = state.progress || { index: 0, total: 0, files: 0, label: 'starting' };
-    const pct = p.total ? Math.max(4, Math.round(((p.index - 0.5) / p.total) * 100)) : 4;
+    const pct = syncPct(p);
     return `
       <div>
         <span class="status-eyebrow"><span class="dot busy"></span>Syncing</span>
         <h2>Weaving your settings together</h2>
-        <p>${esc(p.label[0].toUpperCase() + p.label.slice(1))}. Settings go first, so they are safe within seconds.</p>
+        <p class="js-label">${esc(syncLabel(p))}</p>
         <div class="row"><button class="btn" data-act="cancel">${svg('stop')}Stop</button></div>
-        <div class="progress"><div class="bar"><i style="width:${pct}%"></i></div>
-          <div class="meta"><span>Step ${p.index || 1} of ${p.total || '…'}</span><span>${plural(p.files, 'file')} changed</span></div></div>
+        <div class="progress"><div class="bar"><i class="js-bar" style="width:${pct}%"></i></div>
+          <div class="meta"><span class="js-step">Step ${p.index || 1} of ${p.total || '…'}</span><span class="js-files">${plural(p.files, 'file')} changed</span></div></div>
       </div>`;
   }
   if (state.status === 'error') {
@@ -210,15 +223,37 @@ function historyRows(items) {
   }).join('');
 }
 
+const recentActivity = () => (data.history.length ? `<div class="section-title"><h3>Recent activity</h3><a data-go="history">All history</a></div>
+  <div class="card list">${historyRows(data.history.slice(0, 4))}</div>` : '');
+
+/** Update the overview in place, so the scene's animations keep running. */
+function patchOverview() {
+  const hero = $('#page .hero');
+  hero.classList.toggle('syncing', data.state.status === 'syncing');
+  const body = $('.hero-body', hero);
+  const mode = heroMode();
+  if (mode === 'syncing' && body.dataset.mode === 'syncing') {
+    const p = data.state.progress || { index: 0, total: 0, files: 0, label: 'starting' };
+    $('.js-label', body).textContent = syncLabel(p);
+    $('.js-bar', body).style.width = `${syncPct(p)}%`;
+    $('.js-step', body).textContent = `Step ${p.index || 1} of ${p.total || '…'}`;
+    $('.js-files', body).textContent = `${plural(p.files, 'file')} changed`;
+  } else {
+    body.innerHTML = heroContent();
+    body.dataset.mode = mode;
+  }
+  $('#ov-tiles').innerHTML = versionTiles();
+  $('#ov-activity').innerHTML = recentActivity();
+}
+
 const PAGES = {
   overview() {
     const { state, history } = data;
     return `
       <div class="head"><div class="eyebrow">${esc(data.settings.machine)}</div><h1 class="title">Overview</h1></div>
-      <div class="card hero ${state.status === 'syncing' ? 'syncing' : ''}">${heroContent()}${scene()}</div>
-      ${versionTiles()}
-      ${history.length ? `<div class="section-title"><h3>Recent activity</h3><a data-go="history">All history</a></div>
-        <div class="card list">${historyRows(history.slice(0, 4))}</div>` : ''}`;
+      <div class="card hero ${state.status === 'syncing' ? 'syncing' : ''}"><div class="hero-body" data-mode="${heroMode()}">${heroContent()}</div>${scene()}</div>
+      <div id="ov-tiles">${versionTiles()}</div>
+      <div id="ov-activity">${recentActivity()}</div>`;
   },
 
   versions() {
@@ -313,6 +348,7 @@ function render(force = false) {
   if (!data) return;
   renderMachine();
   if (!force && !LIVE_PAGES.has(page)) return;
+  if (!force && page === 'overview' && $('#page .hero')) return patchOverview();
   const el = $('#page');
   const scroll = el.scrollTop;
   el.innerHTML = PAGES[page]();
