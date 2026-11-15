@@ -46,6 +46,7 @@ export class SyncEngine {
    * @param {{name:string, flavor:string, local:string}[]} [cfg.items]  explicit items (tests)
    * @param {string[]} [cfg.excludes]
    * @param {string} [cfg.rcloneConfig]  path to an rclone.conf (for the smb remote)
+   * @param {Record<string,string>} [cfg.env]  extra environment, e.g. RCLONE_CONFIG_NAS_* remote definition
    * @param {(e:object)=>void} [cfg.onEvent]  progress callback
    */
   constructor(cfg) {
@@ -60,6 +61,9 @@ export class SyncEngine {
   get flavors() { return [...new Set(this.cfg.items.map((i) => i.flavor))]; }
 
   emit(e) { this.cfg.onEvent({ time: Date.now(), ...e }); }
+
+  /** Environment for rclone: lets the app define the NAS remote without a config file. */
+  env() { return { ...process.env, ...(this.cfg.env || {}) }; }
 
   async prepare() {
     const { stateDir, excludes } = this.cfg;
@@ -81,7 +85,8 @@ export class SyncEngine {
     if (rcloneConfig) full.push('--config', rcloneConfig);
     const started = Date.now();
     return new Promise((resolve, reject) => {
-      const p = spawn(rclone, full, { stdio: ['pipe', 'pipe', 'pipe'] });
+      const p = spawn(rclone, full, { stdio: ['pipe', 'pipe', 'pipe'], env: this.env() });
+      this.child = p;
       const logs = [];
       let stats = null;
       let buf = '';
@@ -103,7 +108,7 @@ export class SyncEngine {
       p.stdout.on('data', onData);
       p.stderr.on('data', onData);
       p.on('error', reject);
-      p.on('close', (code) => resolve({ code, logs, stats, ms: Date.now() - started }));
+      p.on('close', (code) => { if (this.child === p) this.child = null; resolve({ code, logs, stats, ms: Date.now() - started }); });
       p.stdin.end();
     });
   }
@@ -153,7 +158,7 @@ export class SyncEngine {
     // bisync refuses to continue after some failures until a resync. Newer-wins plus the
     // backup dirs keep that safe, so retry once instead of leaving the user stuck.
     const needsResync = res.logs.some((l) => /--resync|must run --resync|cannot find prior/i.test(l.msg || ''));
-    if (res.code !== 0 && !resync && needsResync) {
+    if (res.code !== 0 && !resync && needsResync && !this.cancelled) {
       this.emit({ type: 'item-resync', item: item.name });
       return this.syncItem(item, { forceResync: true });
     }
@@ -189,9 +194,20 @@ export class SyncEngine {
     const items = this.cfg.items.filter((i) =>
       (!only.flavors || only.flavors.includes(i.flavor)) &&
       (!only.parts || only.parts.includes(i.name.split('/').pop())));
+    this.cancelled = false;
     const results = [];
-    for (const item of items) results.push(await this.syncItem(item));
-    return { ok: results.every((r) => r.ok), ms: results.reduce((a, r) => a + r.ms, 0), results };
+    for (const item of items) {
+      if (this.cancelled) break;
+      results.push(await this.syncItem(item));
+    }
+    const ok = !this.cancelled && results.every((r) => r.ok);
+    return { ok, cancelled: !!this.cancelled, ms: results.reduce((a, r) => a + r.ms, 0), results };
+  }
+
+  /** Stop a running sync. bisync's --recover lets the next run continue safely. */
+  cancel() {
+    this.cancelled = true;
+    if (this.child) this.child.kill('SIGTERM');
   }
 
   // ---- in-use marker (one per game version) --------------------------------
@@ -203,7 +219,7 @@ export class SyncEngine {
     const { rclone, rcloneConfig } = this.cfg;
     const full = rcloneConfig ? [...args, '--config', rcloneConfig] : args;
     return new Promise((resolve, reject) => {
-      const p = spawn(rclone, full, { stdio: ['pipe', 'pipe', 'pipe'] });
+      const p = spawn(rclone, full, { stdio: ['pipe', 'pipe', 'pipe'], env: this.env() });
       let out = '';
       p.stdout.on('data', (d) => (out += d));
       p.on('error', reject);
