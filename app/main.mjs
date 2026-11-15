@@ -173,7 +173,7 @@ function showWindow() {
 
 function applyLoginItem() {
   // Only a packaged build registers itself; running from source must not add Electron to login items.
-  if (!app.isPackaged) return;
+  if (!app.isPackaged || process.env.LEYLINE_USER_DATA) return; // test runs never register
   app.setLoginItemSettings({ openAtLogin: !!settings.startAtLogin, openAsHidden: true, args: ['--hidden'] });
 }
 

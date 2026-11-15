@@ -10,8 +10,8 @@
     "start": "electron .",
     "fetch-rclone": "node scripts/fetch-rclone.mjs",
     "icons": "node scripts/make-icons.mjs",
-    "dist:win": "node scripts/fetch-rclone.mjs win32-x64 && electron-builder --win nsis --x64",
-    "dist:mac": "node scripts/fetch-rclone.mjs darwin-arm64 && electron-builder --mac dmg --arm64"
+    "dist:win": "node scripts/fetch-rclone.mjs win32-x64 && electron-builder --win nsis --x64 --publish never",
+    "dist:mac": "node scripts/fetch-rclone.mjs darwin-arm64 && electron-builder --mac dmg --arm64 --publish never"
   },
   "devDependencies": {
     "electron": "45.2.1",
@@ -83,7 +83,9 @@
             "rclone"
           ]
         }
-      ]
+      ],
+      "identity": "-",
+      "hardenedRuntime": false
     }
   }
 }

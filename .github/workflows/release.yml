@@ -1,0 +1,144 @@
+# Run by hand: Actions → Release → Run workflow, enter the new version.
+# Bumps the version, tags it, builds Windows and macOS installers on their own platforms,
+# writes release notes from the commits since the last release and publishes the release.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "New version, e.g. 0.2.0"
+        required: true
+        type: string
+      highlights:
+        description: "Optional summary at the top of the release notes"
+        required: false
+        type: string
+      dry_run:
+        description: "Dry run: only build the installers (download them from this run), no tag or release"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  VERSION: ${{ inputs.version }}
+
+jobs:
+  prepare:
+    name: Prepare v${{ inputs.version }}
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.ref.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+
+      - name: Check version
+        run: |
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Version must look like 1.2.3 (got '$VERSION')"; exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::Tag v$VERSION already exists"; exit 1
+          fi
+
+      - name: Write release notes
+        env:
+          HIGHLIGHTS: ${{ inputs.highlights }}
+        run: node scripts/release-notes.mjs --version "$VERSION" --highlights "$HIGHLIGHTS" --repo "$GITHUB_REPOSITORY" > release-notes.md && cat release-notes.md
+
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: release-notes
+          path: release-notes.md
+
+      - name: Bump version, commit and tag
+        if: ${{ !inputs.dry_run }}
+        run: |
+          npm version "$VERSION" --no-git-tag-version
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Release v$VERSION"
+          git tag -a "v$VERSION" -m "Leyline $VERSION"
+          git push origin "HEAD:${GITHUB_REF_NAME}" "v$VERSION"
+
+      - id: ref
+        name: Choose what to build
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then echo "ref=$GITHUB_SHA" >> "$GITHUB_OUTPUT"; else echo "ref=v$VERSION" >> "$GITHUB_OUTPUT"; fi
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            script: dist:win
+            files: dist/Leyline-Setup-*.exe
+          - name: macOS
+            os: macos-latest
+            script: dist:mac
+            files: dist/Leyline-*.dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Set version (dry run builds from the current commit)
+        shell: bash
+        run: npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      - name: Build installer
+        run: npm run ${{ matrix.script }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"   # no signing certificates yet
+
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: installer-${{ matrix.name }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: build
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la out
+          gh release create "v$VERSION" out/Leyline-* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Leyline $VERSION" \
+            --notes-file out/release-notes.md
