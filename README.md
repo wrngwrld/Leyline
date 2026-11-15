@@ -58,11 +58,10 @@ Download the latest installer from [Releases](../../releases):
 
 - **Windows:** `Leyline-Setup-<version>.exe`. The app is not code-signed yet, so Windows
   SmartScreen shows a warning: choose *More info → Run anyway*.
-- **macOS (Apple silicon):** `Leyline-<version>-arm64.dmg`. Not notarized yet: after the
-  first launch attempt, allow it in *System Settings → Privacy & Security → Open Anyway*.
-  When macOS asks whether Leyline may find devices on your local network, choose *Allow*;
-  otherwise it cannot reach your NAS. You can change this later in
-  *System Settings → Privacy & Security → Local Network*.
+- **macOS (Apple silicon):** `Leyline-<version>-arm64.dmg`. Signed and notarized by Apple,
+  so it opens normally. When macOS asks whether Leyline may find devices on your local
+  network, choose *Allow*; otherwise it cannot reach your NAS. You can change this later
+  in *System Settings → Privacy & Security → Local Network*.
 
 ## Development
 
