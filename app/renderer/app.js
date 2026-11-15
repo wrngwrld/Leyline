@@ -261,8 +261,8 @@ const PAGES = {
           <div class="field"><label for="share">Share</label><input class="input" id="share" placeholder="leyline" value="${esc(nas.share)}"></div>
           <div class="field"><label for="user">User</label><input class="input" id="user" placeholder="Your NAS user" value="${esc(nas.user)}"></div>
           <div class="field"><label for="password">Password</label><input class="input" id="password" type="password" placeholder="${hasPassword ? 'Saved — type to replace' : 'Your NAS password'}"></div>
-          <div class="field full"><label for="folder">Folder on the share</label><input class="input mono" id="folder" value="${esc(nas.folder)}">
-            <span class="hint">Leyline keeps everything inside this folder: <span class="mono">current</span> for the live copy, <span class="mono">history</span> for replaced files.</span></div>
+          <div class="field full"><label for="folder">Folder on the share</label><input class="input mono" id="folder" placeholder="Empty: use the root of the share" value="${esc(nas.folder)}">
+            <span class="hint">Leyline keeps everything inside this folder: <span class="mono">current</span> for the live copy, <span class="mono">history</span> for replaced files. Leave it empty if the share is only for Leyline.</span></div>
         </form>
         <div class="row" style="margin-top:20px">
           <button class="btn primary" data-act="nas-save">Save</button>
@@ -327,7 +327,8 @@ function go(p) {
   render(true);
 }
 
-const nasFields = () => ({ host: $('#host').value.trim(), share: $('#share').value.trim(), user: $('#user').value.trim(), folder: $('#folder').value.trim() || 'Leyline' });
+// An empty folder means the root of the share (fine for a share dedicated to Leyline).
+const nasFields = () => ({ host: $('#host').value.trim(), share: $('#share').value.trim(), user: $('#user').value.trim(), folder: $('#folder').value.trim().replace(/^[\\/]+|[\\/]+$/g, '') });
 
 function nasResult(r) {
   $('#nas-result').innerHTML = r.ok

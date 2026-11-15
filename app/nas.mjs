@@ -49,7 +49,10 @@ export function remoteEnv(nas, obscuredPass) {
   };
 }
 
-export const remoteRoot = (nas) => `nas:${nas.share}/${nas.folder}`.replace(/\/+$/, '');
+export const remoteRoot = (nas) => {
+  const folder = (nas.folder || '').replace(/^[\\/]+|[\\/]+$/g, '');
+  return folder ? `nas:${nas.share}/${folder}` : `nas:${nas.share}`;
+};
 
 function friendlyError(text) {
   const t = text.toLowerCase();
