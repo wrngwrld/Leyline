@@ -39,6 +39,21 @@ export function defaultWowRoot(platform = process.platform) {
 
 const isDir = async (p) => { try { return (await stat(p)).isDirectory(); } catch { return false; } };
 
+/** Common install locations, most likely first. */
+export function wowRootCandidates(platform = process.platform) {
+  if (platform === 'darwin') return ['/Applications/World of Warcraft'];
+  if (platform !== 'win32') return [];
+  const out = ['C:\\Program Files (x86)\\World of Warcraft', 'C:\\Program Files\\World of Warcraft'];
+  for (const d of 'CDEFG') out.push(`${d}:\\Games\\World of Warcraft`, `${d}:\\World of Warcraft`, `${d}:\\Battle.net\\World of Warcraft`);
+  return out;
+}
+
+/** First candidate that exists, or the platform default. */
+export async function findWowRoot(platform = process.platform) {
+  for (const c of wowRootCandidates(platform)) if (await isDir(c)) return c;
+  return defaultWowRoot(platform);
+}
+
 /** Find installed flavors under a WoW root. Returns [{id, name, hasSettings, hasAddons}]. */
 export async function detectFlavors(wowRoot) {
   let entries;

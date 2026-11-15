@@ -22,7 +22,7 @@ export function rclonePath() {
 
 function runRclone(args, { input = '', env = {}, timeoutMs = 20000 } = {}) {
   return new Promise((resolve) => {
-    const p = spawn(rclonePath(), args, { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+    const p = spawn(rclonePath(), args, { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     let out = '', err = '';
     const timer = setTimeout(() => { p.kill(); err += '\nTimed out'; }, timeoutMs);
     p.stdout.on('data', (d) => (out += d));

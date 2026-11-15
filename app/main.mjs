@@ -3,7 +3,7 @@ import { app, BrowserWindow, Tray, Menu, ipcMain, dialog, nativeImage, Notificat
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SyncEngine } from '../engine/sync.mjs';
-import { detectFlavors, flavorName, buildItems } from '../engine/flavors.mjs';
+import { detectFlavors, flavorName, buildItems, findWowRoot } from '../engine/flavors.mjs';
 import * as store from './settings.mjs';
 import { rclonePath, obscure, remoteEnv, remoteRoot, testConnection } from './nas.mjs';
 import { runningFlavors } from './wow.mjs';
@@ -14,6 +14,7 @@ const asset = (f) => path.join(HERE, 'assets', f);
 const isMac = process.platform === 'darwin';
 
 app.setName('Leyline');
+if (process.platform === 'win32') app.setAppUserModelId('app.leyline.desktop'); // needed for notifications
 // Development: a separate settings folder for test runs.
 if (process.env.LEYLINE_USER_DATA) app.setPath('userData', process.env.LEYLINE_USER_DATA);
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -139,7 +140,7 @@ function createWindow() {
     backgroundColor: isMac ? '#00000000' : (nativeTheme.shouldUseDarkColors ? '#0c0d18' : '#f4f3fb'),
     ...(isMac
       ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 20, y: 22 }, vibrancy: 'sidebar', visualEffectState: 'followWindow', transparent: false }
-      : { titleBarStyle: 'hidden', titleBarOverlay: { color: '#00000000', symbolColor: nativeTheme.shouldUseDarkColors ? '#e8e6f3' : '#2a2840', height: 48 }, backgroundMaterial: 'mica' }),
+      : { titleBarStyle: 'hidden', titleBarOverlay: overlayColors() }),
     webPreferences: {
       preload: path.join(HERE, 'preload.cjs'),
       contextIsolation: true,
@@ -153,6 +154,12 @@ function createWindow() {
     if (!quitting) { e.preventDefault(); win.hide(); if (isMac) app.dock?.hide(); }
   });
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+}
+
+// Windows: the minimise/maximise/close buttons sit on the page; match the page background.
+function overlayColors() {
+  const dark = nativeTheme.shouldUseDarkColors;
+  return { color: dark ? '#0c0d18' : '#f6f5fb', symbolColor: dark ? '#e8e6f3' : '#2a2840', height: 48 };
 }
 
 function showWindow() {
@@ -398,6 +405,7 @@ app.on('window-all-closed', (e) => e.preventDefault?.());
 app.whenReady().then(async () => {
   if (process.env.LEYLINE_THEME) nativeTheme.themeSource = process.env.LEYLINE_THEME;
   settings = await store.loadSettings();
+  if (!settings.flavors.length) { settings.wowRoot = await findWowRoot(); await store.saveSettings(settings); }
   history = await store.loadHistory();
   state.lastSync = history.find((h) => h.ok)?.time || null;
   await refreshDetected();
@@ -412,7 +420,10 @@ app.whenReady().then(async () => {
 
   if (process.env.LEYLINE_SCREENSHOTS) captureScreens(process.env.LEYLINE_SCREENSHOTS);
 
-  nativeTheme.on('updated', broadcast);
+  nativeTheme.on('updated', () => {
+    if (!isMac && win && !win.isDestroyed()) win.setTitleBarOverlay(overlayColors());
+    broadcast();
+  });
   setInterval(watchGame, 8000);
   setInterval(updateTray, 60_000); // keep "x min ago" fresh
   scheduleAuto();

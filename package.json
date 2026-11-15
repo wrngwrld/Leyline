@@ -9,9 +9,81 @@
   "scripts": {
     "start": "electron .",
     "fetch-rclone": "node scripts/fetch-rclone.mjs",
-    "icons": "node scripts/make-icons.mjs"
+    "icons": "node scripts/make-icons.mjs",
+    "dist:win": "node scripts/fetch-rclone.mjs win32-x64 && electron-builder --win nsis --x64",
+    "dist:mac": "node scripts/fetch-rclone.mjs darwin-arm64 && electron-builder --mac dmg --arm64"
   },
   "devDependencies": {
-    "electron": "45.2.1"
+    "electron": "45.2.1",
+    "electron-builder": "26.18.1"
+  },
+  "author": "Leyline contributors",
+  "build": {
+    "appId": "app.leyline.desktop",
+    "productName": "Leyline",
+    "copyright": "MIT licensed. Not affiliated with Blizzard Entertainment.",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "app/**",
+      "engine/**",
+      "package.json",
+      "!**/*.md"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "app/assets/icon-512.png",
+      "extraResources": [
+        {
+          "from": "vendor/rclone/win32-x64/",
+          "to": "rclone",
+          "filter": [
+            "rclone.exe"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "artifactName": "Leyline-Setup-${version}.exe",
+      "deleteAppDataOnUninstall": false
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "app/assets/icon-1024.png",
+      "category": "public.app-category.utilities",
+      "extendInfo": {
+        "LSUIElement": false
+      },
+      "extraResources": [
+        {
+          "from": "vendor/rclone/darwin-${arch}/",
+          "to": "rclone",
+          "filter": [
+            "rclone"
+          ]
+        }
+      ]
+    }
   }
 }

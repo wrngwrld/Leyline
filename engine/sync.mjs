@@ -99,7 +99,7 @@ export class SyncEngine {
     if (rcloneConfig) full.push('--config', rcloneConfig);
     const started = Date.now();
     return new Promise((resolve, reject) => {
-      const p = spawn(rclone, full, { stdio: ['pipe', 'pipe', 'pipe'], env: this.env() });
+      const p = spawn(rclone, full, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: this.env() });
       this.child = p;
       const logs = [];
       let stats = null;
@@ -253,7 +253,7 @@ export class SyncEngine {
     const { rclone, rcloneConfig } = this.cfg;
     const full = rcloneConfig ? [...args, '--config', rcloneConfig] : args;
     return new Promise((resolve, reject) => {
-      const p = spawn(rclone, full, { stdio: ['pipe', 'pipe', 'pipe'], env: this.env() });
+      const p = spawn(rclone, full, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: this.env() });
       let out = '';
       p.stdout.on('data', (d) => (out += d));
       p.on('error', reject);
