@@ -1,0 +1,13 @@
+{
+  "rclone": "vendor/rclone/darwin-arm64/rclone",
+  "remoteRoot": "/Volumes/data/Leyline",
+  "machine": "mac",
+  "stateDir": "~/Library/Application Support/Leyline/state",
+  "wowRoot": "/Applications/World of Warcraft",
+  "flavors": [
+    { "id": "_retail_", "enabled": true, "addons": true },
+    { "id": "_classic_era_", "enabled": true, "addons": true },
+    { "id": "_forever_", "enabled": true, "addons": true },
+    { "id": "_classic_beta_", "enabled": false }
+  ]
+}

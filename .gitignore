@@ -1,0 +1,14 @@
+# rclone binaries are downloaded per platform, not committed
+vendor/rclone/*/rclone
+vendor/rclone/*/rclone.exe
+
+# local test data, sync state, configs with credentials
+*.conf
+.state/
+test-data/
+
+node_modules/
+dist/
+out/
+.DS_Store
+Thumbs.db
