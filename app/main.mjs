@@ -180,7 +180,7 @@ function applyLoginItem() {
 async function saveSettings(patch) {
   const { password, ...rest } = patch;
   settings = { ...settings, ...rest, nas: { ...settings.nas, ...(rest.nas || {}) } };
-  if (password !== undefined) settings.passwordEnc = store.encryptPassword(password);
+  if (password !== undefined) settings.passwordEnc = await store.encryptPassword(password);
   await store.saveSettings(settings);
   if ('startAtLogin' in patch) applyLoginItem();
   if ('autoSync' in patch || 'syncIntervalMin' in patch) scheduleAuto();
@@ -195,6 +195,13 @@ async function refreshDetected() {
   const known = new Set(settings.flavors.map((f) => f.id));
   const added = state.detected.filter((d) => !known.has(d.id)).map((d) => ({ id: d.id, enabled: false, addons: true }));
   if (added.length) { settings.flavors = [...settings.flavors, ...added]; await store.saveSettings(settings); }
+}
+
+/** The stored NAS password; re-encrypts it when the OS asks (key rotation). */
+async function nasPassword() {
+  const { password, reEncrypt } = await store.decryptPassword(settings.passwordEnc);
+  if (reEncrypt && password) { settings.passwordEnc = await store.encryptPassword(password); await store.saveSettings(settings); }
+  return password;
 }
 
 // ---- sync ---------------------------------------------------------------
@@ -223,7 +230,7 @@ async function startSync(trigger = 'manual', { onlyFlavors } = {}) {
 
   const started = new Date();
   try {
-    const env = remoteEnv(settings.nas, await obscure(store.decryptPassword(settings.passwordEnc)));
+    const env = remoteEnv(settings.nas, await obscure(await nasPassword()));
     engine = new SyncEngine({
       rclone: rclonePath(),
       remoteRoot: remoteRoot(settings.nas),
@@ -339,7 +346,7 @@ ipcMain.handle('leyline:detect', async (_e, wowRoot) => {
 });
 ipcMain.handle('leyline:test', async (_e, { nas, password }) => {
   try {
-    return await testConnection({ ...settings.nas, ...nas }, password || store.decryptPassword(settings.passwordEnc));
+    return await testConnection({ ...settings.nas, ...nas }, password || (await nasPassword()));
   } catch (err) { return { ok: false, error: err.message }; }
 });
 ipcMain.handle('leyline:sync', () => { startSync('manual'); return true; });

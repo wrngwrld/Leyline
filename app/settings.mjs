@@ -42,15 +42,17 @@ export async function loadSettings() {
 
 export async function saveSettings(s) { await writeJson('settings.json', s); }
 
-export function encryptPassword(plain) {
+export async function encryptPassword(plain) {
   if (!plain) return '';
   if (!safeStorage.isEncryptionAvailable()) throw new Error('Secure storage is not available on this system');
-  return safeStorage.encryptString(plain).toString('base64');
+  return (await safeStorage.encryptStringAsync(plain)).toString('base64');
 }
 
-export function decryptPassword(enc) {
-  if (!enc) return '';
-  return safeStorage.decryptString(Buffer.from(enc, 'base64'));
+/** @returns {Promise<{password: string, reEncrypt: boolean}>} reEncrypt: the OS rotated its key */
+export async function decryptPassword(enc) {
+  if (!enc) return { password: '', reEncrypt: false };
+  const { result, shouldReEncrypt } = await safeStorage.decryptStringAsync(Buffer.from(enc, 'base64'));
+  return { password: result, reEncrypt: !!shouldReEncrypt };
 }
 
 /** Settings as the window may see them: no password, just whether one is stored. */
