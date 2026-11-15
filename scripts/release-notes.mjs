@@ -40,7 +40,7 @@ const curated = new Map([
   ['Let the Addons switch be set before a version is enabled', ['Fixes', 'Let you choose the Addons setting before enabling a game version.']],
 ]);
 
-const internal = /^(add (readme|mit license|nas speed comparison script|script to download)|revert version number|improve release notes)/i;
+const internal = /^(add (readme|mit license|nas speed comparison script|script to download)|revert version number|improve release notes|override vulnerable minimatch)/i;
 const classify = (subject) => {
   if (/\b(password|safe.?storage|encrypt|credential)\b/i.test(subject)) return 'Security & privacy';
   if (/^(fix|let|keep|treat|hide)\b|^update the overview\b/i.test(subject)) return 'Fixes';
