@@ -38,7 +38,7 @@ const dur = (ms) => (ms < 1000 ? `${ms} ms` : ms < 60000 ? `${(ms / 1000).toFixe
 const bytes = (n) => (n < 1048576 ? `${Math.max(1, Math.round(n / 1024))} KB` : n < 1073741824 ? `${(n / 1048576).toFixed(n < 104857600 ? 1 : 0)} MB` : `${(n / 1073741824).toFixed(2)} GB`);
 const left = (s) => (s == null ? '' : s < 60 ? 'less than a minute left' : s < 3600 ? `about ${Math.round(s / 60)} min left` : `about ${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min left`);
 const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? '' : 's'}`;
-const TRIGGERS = { manual: 'Manual', auto: 'Automatic', 'game-closed': 'After playing', startup: 'At startup' };
+const TRIGGERS = { manual: 'Manual', auto: 'Automatic', 'game-closed': 'After playing', startup: 'At startup', 'files-changed': 'Files changed' };
 
 const ICON = {
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
@@ -206,7 +206,7 @@ function heroContent() {
     <div>
       <span class="status-eyebrow"><span class="dot ok"></span>In sync</span>
       <h2>Everything is in sync</h2>
-      <p>Last sync ${rel(state.lastSync)}${changed ? `, ${changed}` : ''}. ${settings.autoSync ? `Leyline syncs every ${settings.syncIntervalMin} minutes and right after you close the game.` : 'Automatic sync is off.'}</p>
+      <p>Last sync ${rel(state.lastSync)}${changed ? `, ${changed}` : ''}. ${settings.autoSync ? `Leyline syncs right after you close the game or update addons, and checks the NAS every ${settings.syncIntervalMin} minutes.` : 'Automatic sync is off.'}</p>
       <div class="row"><button class="btn primary" data-act="sync">${svg('sync')}Sync now</button><button class="btn ghost" data-go="history">View history</button></div>
     </div>`;
 }
@@ -221,8 +221,10 @@ function versionTiles() {
     <div class="tiles">${enabled.map((f) => {
       const playing = state.running.includes(f.id);
       const syncing = state.status === 'syncing' && state.progress?.item?.startsWith(f.id + '/');
+      const pending = (state.pending || []).includes(f.id);
       const pill = playing ? '<span class="pill play">Playing now</span>'
         : syncing ? '<span class="pill busy">Syncing</span>'
+        : pending ? '<span class="pill busy" title="Leyline syncs once the files stop changing">Changes detected</span>'
         : lastFor(f.id) ? `<span class="pill ok">Synced ${rel(lastFor(f.id))}</span>` : '<span class="pill">Not synced yet</span>';
       return `<div class="tile"><div class="t-top">${badge(f.id)}<div><div class="t-name">${esc(flavorName(f.id))}</div>
         <div class="t-sub">${f.addons === false ? 'Settings only' : 'Settings and addons'}</div></div></div><div>${pill}</div></div>`;
@@ -231,10 +233,11 @@ function versionTiles() {
 
 function historyRows(items) {
   return items.map((h) => {
-    const ic = h.cancelled ? svg('stop', 'h-ic off') : h.ok ? svg('check', 'h-ic ok') : svg('x', 'h-ic bad');
-    const title = h.cancelled ? 'Stopped' : !h.ok ? 'Sync failed' : h.transfers ? `Synced ${plural(h.transfers, 'file')}` : 'Checked, nothing to change';
+    const ic = h.cancelled || h.inFlux ? svg('stop', 'h-ic off') : h.ok ? svg('check', 'h-ic ok') : svg('x', 'h-ic bad');
+    const title = h.cancelled ? 'Stopped' : h.inFlux ? 'Files were still changing, retried later'
+      : !h.ok ? 'Sync failed' : h.transfers ? `Synced ${plural(h.transfers, 'file')}` : 'Checked, nothing to change';
     const versions = [...new Set(h.items.map((i) => i.item.split('/')[0]))].map(flavorName).join(', ');
-    const err = !h.ok && !h.cancelled ? h.items.find((i) => !i.ok)?.error : '';
+    const err = !h.ok && !h.cancelled && !h.inFlux ? h.items.find((i) => !i.ok)?.error : '';
     return `<div class="hrow">${ic}
       <div class="h-main"><div class="h-title">${title}</div><div class="h-sub">${esc(err || versions)}</div></div>
       <span class="pill">${TRIGGERS[h.trigger] || h.trigger}</span>
@@ -351,9 +354,9 @@ const PAGES = {
           <input class="input" id="machine-name" value="${esc(s.machine)}"></div>
         <div class="srow"><div class="s-text"><div class="s-title">Start at login</div><div class="s-sub">Leyline starts quietly in the ${data.platform === 'darwin' ? 'menu bar' : 'system tray'} and syncs before you play.</div></div>
           <span class="switch"><input type="checkbox" id="start-login" ${s.startAtLogin ? 'checked' : ''}><span></span></span></div>
-        <div class="srow"><div class="s-text"><div class="s-title">Sync automatically</div><div class="s-sub">In the background, and right after you close a game version.</div></div>
+        <div class="srow"><div class="s-text"><div class="s-title">Sync automatically</div><div class="s-sub">Right after you close a game version or your addon manager finishes, plus a regular check of the NAS.</div></div>
           <span class="switch"><input type="checkbox" id="auto-sync" ${s.autoSync ? 'checked' : ''}><span></span></span></div>
-        <div class="srow"><div class="s-text"><div class="s-title">Background interval</div><div class="s-sub">How often to check the NAS while the game is closed.</div></div>
+        <div class="srow"><div class="s-text"><div class="s-title">Background interval</div><div class="s-sub">How often to look for changes from your other computers.</div></div>
           <select class="input" id="interval" ${s.autoSync ? '' : 'disabled'}>${opts}</select></div>
       </div>
       <div class="card" style="margin-top:18px"><div class="srow"><div class="s-text"><div class="s-title">Leyline ${esc(data.version)}</div>

@@ -3,10 +3,11 @@ import { app, BrowserWindow, Tray, Menu, ipcMain, dialog, nativeImage, Notificat
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SyncEngine } from '../engine/sync.mjs';
-import { detectFlavors, flavorName } from '../engine/flavors.mjs';
+import { detectFlavors, flavorName, buildItems } from '../engine/flavors.mjs';
 import * as store from './settings.mjs';
 import { rclonePath, obscure, remoteEnv, remoteRoot, testConnection } from './nas.mjs';
 import { runningFlavors } from './wow.mjs';
+import { FolderWatcher } from './watcher.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const asset = (f) => path.join(HERE, 'assets', f);
@@ -34,6 +35,7 @@ const state = {
   lastSync: null,          // ISO time of last successful sync
   lastError: null,
   running: [],             // flavor ids of WoW versions currently running
+  pending: [],             // flavors with file changes waiting to settle before they sync
   detected: [],            // flavors found in the WoW folder
 };
 
@@ -90,6 +92,7 @@ function statusLine() {
   }
   if (state.status === 'error') return 'Last sync failed';
   if (state.running.length) return `Playing ${state.running.map(flavorName).join(', ')}`;
+  if (state.pending.length) return `Changes in ${state.pending.map(flavorName).join(', ')}, syncing when they settle`;
   return `In sync · ${relTime(state.lastSync)}`;
 }
 
@@ -174,6 +177,7 @@ async function saveSettings(patch) {
   await store.saveSettings(settings);
   if ('startAtLogin' in patch) applyLoginItem();
   if ('autoSync' in patch || 'syncIntervalMin' in patch) scheduleAuto();
+  if ('flavors' in patch || 'autoSync' in patch || 'wowRoot' in patch || 'nas' in patch || password !== undefined) restartWatcher();
   broadcast();
   return snapshot();
 }
@@ -188,8 +192,17 @@ async function refreshDetected() {
 
 // ---- sync ---------------------------------------------------------------
 
+// Versions that asked for a sync while another one was running; they run right after it.
+const queued = new Set();
+let queuedTrigger = null;
+
 async function startSync(trigger = 'manual', { onlyFlavors } = {}) {
-  if (state.status === 'syncing' || !isConfigured()) return;
+  if (!isConfigured()) return;
+  if (state.status === 'syncing') {
+    for (const f of onlyFlavors || settings.flavors.filter((x) => x.enabled).map((x) => x.id)) queued.add(f);
+    queuedTrigger = trigger;
+    return;
+  }
   // Never sync a game version while it is running: WoW rewrites its files on logout.
   const playing = await runningFlavors();
   state.running = [...playing];
@@ -238,12 +251,19 @@ async function startSync(trigger = 'manual', { onlyFlavors } = {}) {
       ms: r.ms,
       transfers: r.results.reduce((a, x) => a + x.transfers, 0),
       bytes: r.results.reduce((a, x) => a + x.bytes, 0),
-      items: r.results.map((x) => ({ item: x.item, ok: x.ok, transfers: x.transfers, deletes: x.deletes, ms: x.ms, error: x.errors[0] })),
+      items: r.results.map((x) => ({ item: x.item, ok: x.ok, inFlux: x.inFlux, transfers: x.transfers, deletes: x.deletes, ms: x.ms, error: x.errors[0] })),
     };
+    const failed = r.results.filter((x) => !x.ok);
+    // Files changed while we copied them (an addon manager at work): not an error, just try
+    // again once the folder has been quiet for a while.
+    summary.inFlux = !r.ok && !r.cancelled && failed.length > 0 && failed.every((x) => x.inFlux);
     history = await store.addHistory(summary);
     if (r.ok) { state.status = 'idle'; state.lastSync = summary.time; }
     else if (r.cancelled) state.status = 'idle';
-    else {
+    else if (summary.inFlux) {
+      state.status = 'idle';
+      for (const f of new Set(failed.map((x) => x.item.split('/')[0]))) watcher.touch(f);
+    } else {
       state.status = 'error';
       state.lastError = r.results.find((x) => !x.ok)?.errors[0] || 'Sync failed';
       notify('Leyline could not sync', state.lastError);
@@ -256,7 +276,26 @@ async function startSync(trigger = 'manual', { onlyFlavors } = {}) {
     engine = null;
     state.progress = null;
     broadcast();
+    if (queued.size) {
+      const next = [...queued], why = queuedTrigger;
+      queued.clear(); queuedTrigger = null;
+      setTimeout(() => startSync(why || 'files-changed', { onlyFlavors: next }), 1500);
+    }
   }
+}
+
+// ---- folder watcher -------------------------------------------------------
+
+const watcher = new FolderWatcher({
+  quietMs: 30_000,
+  onSettled: (flavor) => { if (settings.autoSync) startSync('files-changed', { onlyFlavors: [flavor] }); },
+  onPending: (pending) => { state.pending = pending; broadcast(); },
+});
+
+function restartWatcher() {
+  if (!settings.autoSync || !isConfigured()) { watcher.stop(); return; }
+  const flavors = settings.flavors.filter((f) => f.enabled);
+  watcher.start(buildItems(settings.wowRoot, flavors).map((i) => ({ flavor: i.flavor, local: i.local })));
 }
 
 // Background sync on a timer, plus right after a game version closes.
@@ -287,6 +326,7 @@ ipcMain.handle('leyline:detect', async (_e, wowRoot) => {
   if (wowRoot) settings.wowRoot = wowRoot;
   await refreshDetected();
   await store.saveSettings(settings);
+  restartWatcher();
   broadcast();
   return snapshot();
 });
@@ -323,6 +363,7 @@ function demoSnapshot(mode) {
     xfer: { bytes: 967713097, totalBytes: 3630000000, transfers: 5812, totalTransfers: 26476, speed: 10400000, eta: 512 } } });
   if (mode === 'error') Object.assign(st, { status: 'error', lastError: 'The NAS rejected the user name or password.' });
   if (mode === 'playing') st.running = ['_forever_'];
+  if (mode === 'idle') st.pending = ['_retail_'];
   return {
     settings: { ...store.publicSettings(settings), flavors, hasPassword: true, nas: { host: '192.168.1.10', share: 'leyline', user: 'player', folder: 'Leyline' } },
     state: st, history: hist, platform: process.platform, version: app.getVersion(),
@@ -351,7 +392,7 @@ async function captureScreens(dir) {
 
 app.on('second-instance', showWindow);
 app.on('activate', showWindow);
-app.on('before-quit', () => { quitting = true; engine?.cancel(); });
+app.on('before-quit', () => { quitting = true; watcher.stop(); engine?.cancel(); });
 app.on('window-all-closed', (e) => e.preventDefault?.());
 
 app.whenReady().then(async () => {
@@ -375,5 +416,6 @@ app.whenReady().then(async () => {
   setInterval(watchGame, 8000);
   setInterval(updateTray, 60_000); // keep "x min ago" fresh
   scheduleAuto();
+  restartWatcher();
   if (settings.autoSync && isConfigured()) setTimeout(() => startSync('startup'), 3000);
 });

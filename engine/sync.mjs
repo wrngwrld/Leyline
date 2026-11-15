@@ -31,6 +31,17 @@ export const DEFAULT_EXCLUDES = [
   '.dropbox*',
 ];
 
+// rclone's wording when a file changes or disappears while it is being copied.
+const IN_FLUX = /being updated|sizes differ|size changed|modtime changed|mod time changed|vanished|no such file or directory|file not found|object not found/i;
+// bisync's summary lines that accompany any failure; they say nothing about the cause.
+const SUMMARY = /^(\x1b\[[0-9;]*m)?bisync (critical error|aborted)|^\x1b|errors? (occurred|during)|failed to bisync|out of sync/i;
+
+/** True when every real error is "a file changed while copying", i.e. someone else is writing. */
+export function isInFlux(errors) {
+  const real = errors.filter((e) => e && !SUMMARY.test(e));
+  return real.length > 0 && real.every((e) => IN_FLUX.test(e));
+}
+
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 const joinRemote = (root, ...parts) => [root.replace(/\/+$/, ''), ...parts].join('/');
 
@@ -169,7 +180,10 @@ export class SyncEngine {
     // bisync refuses to continue after some failures until a resync. Newer-wins plus the
     // backup dirs keep that safe, so retry once instead of leaving the user stuck.
     const needsResync = res.logs.some((l) => /--resync|must run --resync|cannot find prior/i.test(l.msg || ''));
-    if (res.code !== 0 && !resync && needsResync && !this.cancelled) {
+    // ...unless files were still changing under us: retrying now would hit the same churn.
+    // The caller retries once the folder is quiet, and that run recovers with a resync.
+    const churn = isInFlux(res.logs.filter((l) => l.level === 'error').map((l) => l.msg?.trim()));
+    if (res.code !== 0 && !resync && needsResync && !churn && !this.cancelled) {
       this.emit({ type: 'item-resync', item: item.name });
       return this.syncItem(item, { forceResync: true });
     }
@@ -191,6 +205,7 @@ export class SyncEngine {
       checks: s.checks ?? 0,
       errors: res.logs.filter((l) => l.level === 'error').map((l) => l.msg?.trim()).slice(0, 10),
     };
+    result.inFlux = !result.ok && isInFlux(result.errors);
     this.emit({ type: 'item-done', ...result });
     return result;
   }
