@@ -25,6 +25,7 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
+  ['Sign and notarize the macOS app', ['Improvements', 'The macOS app is now signed and notarized by Apple. It opens without the "Open Anyway" step, and after one last confirmation, updates no longer ask again for Keychain and Local Network access.']],
   ['Ask macOS for Local Network access so the app can reach the NAS', ['Fixes', 'Fix "Could not reach the NAS" in the macOS app: Leyline now asks for Local Network access, which it needs to connect to your NAS.']],
   ['Add Windows build and fix Windows-specific issues', ['Features', 'Install Leyline on Windows as well as macOS.']],
   ['Sync addons when their folder settles, not mid-update', ['Features', 'Wait until addon-manager updates finish before syncing, so other computers never receive a half-updated addon.']],
@@ -68,6 +69,6 @@ for (const [title, list] of Object.entries(groups)) {
 if (!commits.length) out += 'Maintenance release.\n\n';
 out += `## Downloads\n\n`;
 out += `- **Windows:** \`Leyline-Setup-${version}.exe\`. Not code-signed yet: in the SmartScreen warning choose *More info → Run anyway*.\n`;
-out += `- **macOS (Apple silicon):** \`Leyline-${version}-arm64.dmg\`. Not notarized yet: after the first launch attempt, allow it in *System Settings → Privacy & Security → Open Anyway*. When asked, allow Leyline to access your local network so it can reach your NAS (*System Settings → Privacy & Security → Local Network*).\n`;
+out += `- **macOS (Apple silicon):** \`Leyline-${version}-arm64.dmg\`. Signed and notarized by Apple, so it opens normally. When asked, allow Leyline to access your local network so it can reach your NAS (*System Settings → Privacy & Security → Local Network*).\n`;
 if (prev && repo) out += `\n## Full changelog\n\nhttps://github.com/${repo}/compare/${prev}...v${version}\n`;
 process.stdout.write(out);
