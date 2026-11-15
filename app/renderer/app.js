@@ -35,6 +35,8 @@ function rel(iso) {
 }
 const when = (iso) => new Date(iso).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 const dur = (ms) => (ms < 1000 ? `${ms} ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.floor(ms / 60000)} min ${Math.round((ms % 60000) / 1000)} s`);
+const bytes = (n) => (n < 1048576 ? `${Math.max(1, Math.round(n / 1024))} KB` : n < 1073741824 ? `${(n / 1048576).toFixed(n < 104857600 ? 1 : 0)} MB` : `${(n / 1073741824).toFixed(2)} GB`);
+const left = (s) => (s == null ? '' : s < 60 ? 'less than a minute left' : s < 3600 ? `about ${Math.round(s / 60)} min left` : `about ${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min left`);
 const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? '' : 's'}`;
 const TRIGGERS = { manual: 'Manual', auto: 'Automatic', 'game-closed': 'After playing', startup: 'At startup' };
 
@@ -106,7 +108,25 @@ function scene() {
 // ---- pages ----------------------------------------------------------------
 
 const syncLabel = (p) => `${p.label[0].toUpperCase() + p.label.slice(1)}. Settings go first, so they are safe within seconds.`;
-const syncPct = (p) => (p.total ? Math.max(4, Math.round(((p.index - 0.5) / p.total) * 100)) : 4);
+/**
+ * Progress of the step that is running, by bytes (or files). Steps differ hugely in size
+ * (settings are a few MB, addons gigabytes), so counting steps would mislead.
+ */
+function syncPct(p) {
+  const x = p.xfer;
+  const frac = x?.totalBytes ? x.bytes / x.totalBytes : x?.totalTransfers ? x.transfers / x.totalTransfers : 0;
+  return Math.max(3, Math.min(100, frac * 100));
+}
+function syncMeta(p) {
+  const x = p.xfer;
+  const step = `Step ${p.index || 1} of ${p.total || '…'}`;
+  if (!x || !x.totalTransfers) return [`${step} · comparing files…`, ""];
+  const speed = x.speed ? `${bytes(x.speed)}/s` : '';
+  return [
+    `${x.transfers.toLocaleString()} of ${plural(x.totalTransfers, 'file')} · ${bytes(x.bytes)} of ${bytes(x.totalBytes)}`,
+    [speed, left(x.eta)].filter(Boolean).join(' · '),
+  ];
+}
 
 /** Which hero card to show; the card is rebuilt only when this changes. */
 function heroMode() {
@@ -149,7 +169,7 @@ function heroContent() {
         <p class="js-label">${esc(syncLabel(p))}</p>
         <div class="row"><button class="btn" data-act="cancel">${svg('stop')}Stop</button></div>
         <div class="progress"><div class="bar"><i class="js-bar" style="width:${pct}%"></i></div>
-          <div class="meta"><span class="js-step">Step ${p.index || 1} of ${p.total || '…'}</span><span class="js-files">${plural(p.files, 'file')} changed</span></div></div>
+          <div class="meta"><span class="js-step">${esc(syncMeta(p)[0])}</span><span class="js-files">${esc(syncMeta(p)[1])}</span></div></div>
       </div>`;
   }
   if (state.status === 'error') {
@@ -236,8 +256,9 @@ function patchOverview() {
     const p = data.state.progress || { index: 0, total: 0, files: 0, label: 'starting' };
     $('.js-label', body).textContent = syncLabel(p);
     $('.js-bar', body).style.width = `${syncPct(p)}%`;
-    $('.js-step', body).textContent = `Step ${p.index || 1} of ${p.total || '…'}`;
-    $('.js-files', body).textContent = `${plural(p.files, 'file')} changed`;
+    const [a, b] = syncMeta(p);
+    $('.js-step', body).textContent = a;
+    $('.js-files', body).textContent = b;
   } else {
     body.innerHTML = heroContent();
     body.dataset.mode = mode;

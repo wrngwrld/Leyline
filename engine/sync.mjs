@@ -80,8 +80,8 @@ export class SyncEngine {
   /** Run rclone, collecting JSON log lines. Resolves {code, logs, stats, ms}. */
   run(args) {
     const { rclone, rcloneConfig } = this.cfg;
-    // Long stats interval: no periodic noise, but rclone still logs one final stats entry.
-    const full = [...args, '--use-json-log', '--log-level', 'INFO', '--stats', '1h', '--stats-log-level', 'NOTICE'];
+    // Stats every 2 s drive the live progress (files/bytes done of total, speed, time left).
+    const full = [...args, '--use-json-log', '--log-level', 'INFO', '--stats', '2s', '--stats-log-level', 'NOTICE'];
     if (rcloneConfig) full.push('--config', rcloneConfig);
     const started = Date.now();
     return new Promise((resolve, reject) => {
@@ -98,7 +98,18 @@ export class SyncEngine {
           if (!line.trim()) continue;
           let entry;
           try { entry = JSON.parse(line); } catch { entry = { level: 'info', msg: line }; }
-          if (entry.stats) stats = entry.stats;
+          if (entry.stats) {
+            stats = entry.stats;
+            const st = entry.stats;
+            this.emit({
+              type: 'stats',
+              bytes: st.bytes ?? 0, totalBytes: st.totalBytes ?? 0,
+              transfers: st.transfers ?? 0, totalTransfers: st.totalTransfers ?? 0,
+              checks: st.checks ?? 0, totalChecks: st.totalChecks ?? 0,
+              speed: st.speed ?? 0, eta: st.eta ?? null,
+            });
+            continue; // periodic stats are not log lines worth keeping
+          }
           logs.push(entry);
           if (entry.object && /Copied|Deleted|Moved/.test(entry.msg || '')) {
             this.emit({ type: 'file', msg: entry.msg.trim(), object: entry.object });

@@ -81,7 +81,13 @@ function trayImage(frame = 0) {
 
 function statusLine() {
   if (!isConfigured()) return 'Not set up yet';
-  if (state.status === 'syncing') return state.progress ? `Syncing ${state.progress.label}…` : 'Syncing…';
+  if (state.status === 'syncing') {
+    const p = state.progress;
+    if (!p) return 'Syncing…';
+    const x = p.xfer;
+    const pct = x?.totalBytes ? ` · ${Math.floor((x.bytes / x.totalBytes) * 100)}%` : '';
+    return `Syncing ${p.label}${pct}`;
+  }
   if (state.status === 'error') return 'Last sync failed';
   if (state.running.length) return `Playing ${state.running.map(flavorName).join(', ')}`;
   return `In sync · ${relTime(state.lastSync)}`;
@@ -211,11 +217,15 @@ async function startSync(trigger = 'manual', { onlyFlavors } = {}) {
           const items = engine.cfg.items;
           const idx = items.findIndex((i) => i.name === e.item);
           const [fl, part] = e.item.split('/');
-          state.progress = { item: e.item, label: `${flavorName(fl)} ${part === 'AddOns' ? 'addons' : 'settings'}`, index: idx + 1, total: items.length, files: state.progress?.files || 0 };
+          state.progress = { item: e.item, label: `${flavorName(fl)} ${part === 'AddOns' ? 'addons' : 'settings'}`, index: idx + 1, total: items.length, files: state.progress?.files || 0, xfer: null };
           broadcast();
         } else if (e.type === 'file') {
           state.progress.files++;
-          if (state.progress.files % 25 === 0) broadcast();
+        } else if (e.type === 'stats' && state.progress) {
+          // live numbers for the current step: files/bytes done of queued, speed, seconds left
+          const { bytes, totalBytes, transfers, totalTransfers, speed, eta } = e;
+          state.progress.xfer = { bytes, totalBytes, transfers, totalTransfers, speed, eta };
+          broadcast();
         }
       },
     });
@@ -309,7 +319,8 @@ function demoSnapshot(mode) {
     { time: ago(1500), trigger: 'startup', ok: true, cancelled: true, ms: 8000, transfers: 12, bytes: 0, items: [item('_retail_', 'Account', 12)] },
   ];
   const st = { ...state, configured: true, status: 'idle', lastSync: ago(3), running: [], progress: null, lastError: null };
-  if (mode === 'syncing') Object.assign(st, { status: 'syncing', progress: { item: '_forever_/AddOns', label: 'Forever addons', index: 5, total: 6, files: 412 } });
+  if (mode === 'syncing') Object.assign(st, { status: 'syncing', progress: { item: '_forever_/AddOns', label: 'Forever addons', index: 6, total: 6, files: 5812,
+    xfer: { bytes: 967713097, totalBytes: 3630000000, transfers: 5812, totalTransfers: 26476, speed: 10400000, eta: 512 } } });
   if (mode === 'error') Object.assign(st, { status: 'error', lastError: 'The NAS rejected the user name or password.' });
   if (mode === 'playing') st.running = ['_forever_'];
   return {

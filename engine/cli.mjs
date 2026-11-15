@@ -28,6 +28,7 @@ const quiet = rest.includes('--quiet');
 let files = 0;
 cfg.onEvent = (e) => {
   if (e.type === 'file') { files++; if (!quiet && files <= 20) console.error(`  ${e.msg}: ${e.object}`); return; }
+  if (e.type === 'stats' && rest.includes('--progress') && e.totalTransfers) console.error(`  … ${e.transfers}/${e.totalTransfers} files, ${(e.bytes / 1048576).toFixed(1)}/${(e.totalBytes / 1048576).toFixed(1)} MB, ${(e.speed / 1048576).toFixed(1)} MB/s, eta ${e.eta ?? '?'} s`);
   if (e.type === 'item-start') console.error(`> ${e.item}${e.resync ? ' (first sync / resync)' : ''}`);
   if (e.type === 'item-resync') console.error(`  ${e.item}: retrying with resync`);
   if (e.type === 'item-done') console.error(`  ${e.item}: ${e.ok ? 'ok' : 'FAILED code ' + e.code} in ${(e.ms / 1000).toFixed(1)}s, ${e.transfers} transfers, ${(e.bytes / 1048576).toFixed(1)} MB, ${e.checks} checks, ${e.deletes} deletes`);
