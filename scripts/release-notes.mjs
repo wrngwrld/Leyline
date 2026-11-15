@@ -25,6 +25,7 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
+  ['Ask macOS for Local Network access so the app can reach the NAS', ['Fixes', 'Fix "Could not reach the NAS" in the macOS app: Leyline now asks for Local Network access, which it needs to connect to your NAS.']],
   ['Add Windows build and fix Windows-specific issues', ['Features', 'Install Leyline on Windows as well as macOS.']],
   ['Sync addons when their folder settles, not mid-update', ['Features', 'Wait until addon-manager updates finish before syncing, so other computers never receive a half-updated addon.']],
   ['Show real sync progress: files, data, speed and time left', ['Features', 'Follow each sync with live file and data counts, transfer speed, and estimated time remaining.']],
@@ -38,7 +39,7 @@ const curated = new Map([
   ['Let the Addons switch be set before a version is enabled', ['Fixes', 'Let you choose the Addons setting before enabling a game version.']],
 ]);
 
-const internal = /^(add (readme|mit license|nas speed comparison script|script to download)|revert version number)/i;
+const internal = /^(add (readme|mit license|nas speed comparison script|script to download)|revert version number|improve release notes)/i;
 const classify = (subject) => {
   if (/\b(password|safe.?storage|encrypt|credential)\b/i.test(subject)) return 'Security & privacy';
   if (/^(fix|let|keep|treat|hide)\b|^update the overview\b/i.test(subject)) return 'Fixes';

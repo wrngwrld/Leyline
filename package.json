@@ -73,7 +73,8 @@
       "icon": "app/assets/icon-1024.png",
       "category": "public.app-category.utilities",
       "extendInfo": {
-        "LSUIElement": false
+        "LSUIElement": false,
+        "NSLocalNetworkUsageDescription": "Leyline connects to your NAS on the local network to sync your World of Warcraft settings and addons."
       },
       "extraResources": [
         {
