@@ -42,6 +42,9 @@ export function isInFlux(errors) {
   return real.length > 0 && real.every((e) => IN_FLUX.test(e));
 }
 
+/** 'settings' (WTF folders) or 'addons'; explicit test items are classified by their name. */
+const itemKind = (item) => item.kind || (/(^|\/)AddOns$/i.test(item.name) ? 'addons' : 'settings');
+
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 const joinRemote = (root, ...parts) => [root.replace(/\/+$/, ''), ...parts].join('/');
 
@@ -172,6 +175,11 @@ export class SyncEngine {
       '--max-lock', '5m',
       '--transfers', '16', '--checkers', '32',
     ];
+    // bisync stops when *every* file in a folder changed ("all files were changed"), which is
+    // a good brake for addons but exactly what WoW does to settings: on logout it rewrites all
+    // SavedVariables. Settings folders are small and every replaced file goes to history, so
+    // let them through.
+    if (itemKind(item) === 'settings') args.push('--force');
     if (resync) args.push('--resync', '--resync-mode', 'newer');
 
     this.emit({ type: 'item-start', item: item.name, resync });
