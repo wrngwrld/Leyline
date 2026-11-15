@@ -241,7 +241,7 @@ const PAGES = {
           return `<div class="vrow" data-id="${esc(f.id)}">${badge(f.id)}
             <div><div class="v-name">${esc(flavorName(f.id))}${playing ? '<span class="pill play">Playing</span>' : ''}${!d ? '<span class="pill bad">Folder missing</span>' : ''}</div>
               <div class="v-sub mono">${esc(f.id)}</div></div>
-            <label class="toggle">Addons <span class="switch"><input type="checkbox" data-k="addons" ${f.addons !== false ? 'checked' : ''} ${f.enabled ? '' : 'disabled'}><span></span></span></label>
+            <label class="toggle">Addons <span class="switch"><input type="checkbox" data-k="addons" ${f.addons !== false ? 'checked' : ''}><span></span></span></label>
             <label class="toggle">Sync <span class="switch"><input type="checkbox" data-k="enabled" ${f.enabled ? 'checked' : ''}><span></span></span></label>
           </div>`;
         }).join('') : `<div class="empty"><b>No game versions found</b>Choose the folder that contains _retail_, _classic_ and so on.</div>`}
