@@ -376,7 +376,7 @@ document.addEventListener('change', async (e) => {
   if (row) {
     const flavors = data.settings.flavors.map((f) => (f.id === row.dataset.id ? { ...f, [t.dataset.k]: t.checked } : f));
     data = await api.save({ flavors });
-    render(true);
+    render(); // redraw in place: keeps the scroll position
     return;
   }
   if (t.id === 'machine-name' && t.value.trim()) { data = await api.save({ machine: t.value.trim() }); renderMachine(); toast('Name saved'); }
