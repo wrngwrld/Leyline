@@ -119,6 +119,17 @@ export class FolderWatcher {
   }
 
   /**
+   * Leyline is about to read the .toc files of these versions. Windows reports even reads as
+   * changes, so for a minute such events do not count (the 'recent' list is checked for held
+   * events too, when they are released).
+   */
+  ignoreReads(flavors, graceMs = 60_000) {
+    const now = Date.now();
+    this.recent = this.recent.filter((r) => r.until > now);
+    this.recent.push({ flavors: new Set(flavors), isOwn: (_name, rel) => /\.toc$/i.test(rel), until: now + graceMs });
+  }
+
+  /**
    * Leyline is about to sync these versions: collect changes instead of reacting to them,
    * because most will be Leyline's own writes. Changes seen before now are covered by the sync.
    */

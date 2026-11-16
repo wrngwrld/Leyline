@@ -389,7 +389,7 @@ async function runSync(trigger, { onlyFlavors, force }) {
       if (f.start && syncing.includes(f.id) && !(await engine.firstSyncInfo(f.id)).firstRun) { delete f.start; forgot = true; }
     }
     if (forgot) await store.saveSettings(settings);
-    await housekeeping(engine);
+    await housekeeping(engine, r.results.some((x) => x.transfers || x.deletes));
   } catch (err) {
     state.status = 'error';
     state.lastError = err.message;
@@ -446,14 +446,16 @@ const machineInfo = () => ({
 let addonList = {};
 async function scanAddons() {
   if (!settings.wowRoot) return;
-  try { addonList = await addonVersions(settings.wowRoot, settings.flavors.filter((f) => f.enabled).map((f) => f.id)); } catch { /* keep the previous list */ }
+  const ids = settings.flavors.filter((f) => f.enabled).map((f) => f.id);
+  watcher.ignoreReads(ids); // before reading: on Windows the reads show up as "changes" and would start another sync
+  try { addonList = await addonVersions(settings.wowRoot, ids); } catch { /* keep the previous list */ }
 }
 
 let computers = { ok: true, list: [], fetched: null, error: null };
 
 /** After each sync: tell the NAS this computer exists, and drop old backups once a day. */
-async function housekeeping(eng) {
-  await scanAddons();
+async function housekeeping(eng, changed = true) {
+  if (changed || !Object.keys(addonList).length) await scanAddons(); // addons only change when a sync brings or sends files
   try { await eng.writeMachine(machineInfo()); } catch { /* the sync itself worked; try again next time */ }
   const days = settings.keepHistoryDays;
   if (!days || (settings.lastPrune && Date.now() - new Date(settings.lastPrune).getTime() < 20 * 3600_000)) return;
