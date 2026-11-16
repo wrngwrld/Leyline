@@ -150,6 +150,8 @@ const syncLabel = (p) => `${p.label[0].toUpperCase() + p.label.slice(1)}. Settin
  */
 function syncPct(p) {
   if (p.resync) return 100; // shown as a moving bar: the totals are not known yet
+  const pl = p.plan;
+  if (pl && (pl.bytes || pl.files)) return Math.max(3, Math.min(100, 100 * (pl.bytes ? pl.doneBytes / pl.bytes : pl.doneFiles / pl.files)));
   const x = p.xfer;
   const frac = x?.totalBytes ? x.bytes / x.totalBytes : x?.totalTransfers ? x.transfers / x.totalTransfers : 0;
   return Math.max(3, Math.min(100, frac * 100));
@@ -157,8 +159,15 @@ function syncPct(p) {
 function syncMeta(p) {
   const x = p.xfer;
   const step = `Step ${p.index || 1} of ${p.total || '…'}`;
+  const speed = x?.speed ? `${bytes(x.speed)}/s` : '';
+  // A normal sync knows exactly what it copies before it starts: count against that plan.
+  const pl = p.plan;
+  if (pl && !p.resync) {
+    if (!pl.files) return [`${step} · nothing to copy`, ''];
+    const leftS = x?.speed && pl.bytes ? (pl.bytes - pl.doneBytes) / x.speed : null;
+    return [`${pl.doneFiles.toLocaleString()} of ${plural(pl.files, 'file')} · ${bytes(pl.doneBytes)} of ${bytes(pl.bytes)}`, [speed, left(leftS)].filter(Boolean).join(' · ')];
+  }
   if (!x || !x.totalTransfers) return [`${step} · comparing files…`, ""];
-  const speed = x.speed ? `${bytes(x.speed)}/s` : '';
   // A full comparison finds files while it copies, so its totals keep growing:
   // show only what is done, not a percentage or time left that would be wrong.
   if (p.resync) return [`${step} · comparing everything · ${plural(x.transfers, 'file')}, ${bytes(x.bytes)} so far`, speed];

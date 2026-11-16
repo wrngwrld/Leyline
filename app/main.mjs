@@ -284,6 +284,10 @@ async function startSync(trigger = 'manual', { onlyFlavors, force = false } = {}
           const [fl, part] = e.item.split('/');
           state.progress = { item: e.item, label: `${flavorName(fl)} ${part === 'AddOns' ? 'addons' : 'settings'}`, index: idx + 1, total: items.length, files: state.progress?.files || 0, xfer: null, resync: !!e.resync };
           broadcast();
+        } else if (e.type === 'plan' && state.progress) {
+          // exact totals for this step, fixed before copying starts
+          state.progress.plan = { files: e.files, bytes: e.bytes, doneFiles: e.doneFiles, doneBytes: e.doneBytes };
+          broadcast();
         } else if (e.type === 'file') {
           state.progress.files++;
         } else if (e.type === 'stats' && state.progress) {

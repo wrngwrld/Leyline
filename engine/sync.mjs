@@ -20,7 +20,7 @@
 
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile, readFile, readdir, rm, utimes, copyFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { buildItems } from './flavors.mjs';
@@ -143,6 +143,27 @@ export function parseCopyChanges(logs) {
   return out.sort((a, b) => a.path.localeCompare(b.path));
 }
 
+/**
+ * Sizes of the files in bisync's new listings ("<…>.path1.lst-new", "<…>.path2.lst-new"),
+ * which it writes before applying changes. Lines look like:  -  5000 - - 2026-…  "X/f0.lua"
+ */
+function readListingSizes(workdir) {
+  const out = { Path1: new Map(), Path2: new Map() };
+  let names = [];
+  try { names = readdirSync(workdir); } catch { return out; }
+  for (const [side, suffix] of [['Path1', '.path1.lst-new'], ['Path2', '.path2.lst-new']]) {
+    const f = names.find((n) => n.endsWith(suffix));
+    if (!f) continue;
+    let text = '';
+    try { text = readFileSync(path.join(workdir, f), 'utf8'); } catch { continue; }
+    for (const line of text.split('\n')) {
+      const m = /^-\s+(\d+)\s.*?"(.*)"$/.exec(line);
+      if (m) out[side].set(m[2].replace(/\\"/g, '"'), Number(m[1]));
+    }
+  }
+  return out;
+}
+
 /** A relative path inside a synced folder, never escaping it. */
 export function safeRel(rel) {
   const p = slash(String(rel || ''));
@@ -167,6 +188,7 @@ export class SyncEngine {
    */
   constructor(cfg) {
     this.cfg = { excludes: DEFAULT_EXCLUDES, onEvent: () => {}, ...cfg };
+    this.cfg.onEvent ||= () => {};
     const home = (p) => (typeof p === 'string' && /^~(?=$|[\\/])/.test(p) ? path.join(os.homedir(), p.slice(1)) : p);
     for (const k of ['stateDir', 'wowRoot', 'remoteRoot', 'rclone', 'rcloneConfig']) this.cfg[k] = home(this.cfg[k]);
     if (!this.cfg.items) this.cfg.items = buildItems(this.cfg.wowRoot, this.cfg.flavors || []);
@@ -243,6 +265,7 @@ export class SyncEngine {
           if (entry.object && /Copied|Deleted|Moved/.test(entry.msg || '')) {
             this.emit({ type: 'file', msg: entry.msg.trim(), object: entry.object });
           }
+          this.onLog?.(entry, logs);
         }
       };
       p.stdout.on('data', onData);
@@ -330,7 +353,9 @@ export class SyncEngine {
     if (resync) args.push('--resync', '--resync-mode', 'newer');
 
     this.emit({ type: 'item-start', item: item.name, resync });
+    if (!resync) this.watchPlan(item, remote, workdir);
     let res = await this.run(args);
+    this.onLog = null;
 
     // bisync refuses to continue after some failures until a resync. Newer-wins plus the
     // backup dirs keep that safe, so retry once instead of leaving the user stuck.
@@ -368,7 +393,14 @@ export class SyncEngine {
     // confirmed a copy just taken from the NAS, that copy's file list says what changed.
     const changes = adopted ? adopted.changes : resync ? [] : parseChanges(res.logs, item.local, remote);
     result.changesKnown = adopted ? true : !resync;
-    if (adopted) { result.ms += adopted.ms; result.transfers = Math.max(result.transfers, changes.filter((c) => c.action !== 'deleted').length); result.adopted = true; }
+    if (adopted) { result.ms += adopted.ms; result.adopted = true; }
+    // With a file list, count what really happened to files. rclone's statistics also count
+    // moving an old version into the backup as a transfer when that happens on this
+    // computer, so the same update looked twice as big on the receiving side.
+    if (result.changesKnown) {
+      result.transfers = changes.filter((c) => c.action !== 'deleted').length;
+      result.deletes = changes.filter((c) => c.action === 'deleted').length;
+    }
     result.changeCount = changes.length;
     result.changes = changes.slice(0, MAX_CHANGES);
     this.emit({ type: 'item-done', ...result, changes: undefined });
@@ -413,6 +445,35 @@ export class SyncEngine {
       if (code === 0 && out.split('\n').some((n) => n.trim() && !junk.test(n.trim().replace(/\/$/, '')))) return { firstRun: true, decide: true };
     }
     return { firstRun: true, decide: false };
+  }
+
+  /**
+   * Exact totals for a normal sync, known before the first byte moves: bisync logs every
+   * file it will copy ("Queue copy to …") and then starts copying ("Do queued copies"); its
+   * new listings in the work folder hold each file's size. rclone's own running totals only
+   * grow while it copies, so progress is counted against this plan instead.
+   */
+  watchPlan(item, remote, workdir) {
+    let plan = null;
+    this.onLog = (entry, logs) => {
+      const msg = (entry.msg || '').replace(ANSI, '').trim();
+      if (/^- Path[12]\s+Do queued copies to/.test(msg)) {
+        const copies = parseChanges(logs, item.local, remote).filter((c) => c.action !== 'deleted');
+        const sizes = readListingSizes(workdir);
+        const files = new Map(copies.map((c) => [c.path, (c.dir === 'out' ? sizes.Path1 : sizes.Path2).get(c.path) ?? 0]));
+        // the second direction ("Do queued copies to Path1") extends the plan; keep what is done
+        const done = new Set([...(plan?.done || [])].filter((p) => files.has(p)));
+        plan = { files, done, doneBytes: [...done].reduce((a, p) => a + files.get(p), 0), totalBytes: [...files.values()].reduce((a, b) => a + b, 0) };
+        this.emit({ type: 'plan', files: files.size, bytes: plan.totalBytes, doneFiles: done.size, doneBytes: plan.doneBytes });
+        return;
+      }
+      if (!plan || !entry.object || !/^Copied/.test(msg)) return;
+      const obj = slash(String(entry.object));
+      if (!plan.files.has(obj) || plan.done.has(obj)) return;
+      plan.done.add(obj);
+      plan.doneBytes += plan.files.get(obj);
+      this.emit({ type: 'plan', files: plan.files.size, bytes: plan.totalBytes, doneFiles: plan.done.size, doneBytes: plan.doneBytes });
+    };
   }
 
   // ---- backups (history) ----------------------------------------------------
