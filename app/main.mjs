@@ -4,7 +4,7 @@ import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { SyncEngine } from '../engine/sync.mjs';
-import { detectFlavors, flavorName, buildItems, findWowRoot } from '../engine/flavors.mjs';
+import { detectFlavors, flavorName, buildItems, findWowRoot, listAddons } from '../engine/flavors.mjs';
 import * as store from './settings.mjs';
 import { rclonePath, obscure, remoteEnv, remoteRoot, testConnection } from './nas.mjs';
 import { runningFlavors } from './wow.mjs';
@@ -191,8 +191,26 @@ function applyLoginItem() {
   app.setLoginItemSettings({ openAtLogin: !!settings.startAtLogin, openAsHidden: true, args: ['--hidden'] });
 }
 
+// Addon choices changed: sync those versions once the user stops clicking switches.
+let choiceTimer = null;
+const choiceFlavors = new Set();
+function syncAfterChoice(flavors) {
+  for (const f of flavors) choiceFlavors.add(f);
+  clearTimeout(choiceTimer);
+  choiceTimer = setTimeout(() => {
+    const only = [...choiceFlavors];
+    choiceFlavors.clear();
+    if (settings.autoSync) startSync('addons-changed', { onlyFlavors: only });
+  }, 5000);
+}
+
 async function saveSettings(patch) {
   const { password, ...rest } = patch;
+  if (rest.flavors) {
+    const before = new Map(settings.flavors.map((f) => [f.id, JSON.stringify(f.skip || {})]));
+    const changed = rest.flavors.filter((f) => f.enabled && before.has(f.id) && before.get(f.id) !== JSON.stringify(f.skip || {})).map((f) => f.id);
+    if (changed.length) syncAfterChoice(changed);
+  }
   settings = { ...settings, ...rest, nas: { ...settings.nas, ...(rest.nas || {}) } };
   if (password !== undefined) settings.passwordEnc = await store.encryptPassword(password);
   await store.saveSettings(settings);
@@ -498,6 +516,11 @@ ipcMain.handle('leyline:test', async (_e, { nas, password }) => {
 });
 ipcMain.handle('leyline:sync', () => { startSync('manual'); return true; });
 ipcMain.handle('leyline:cancel', () => { engine?.cancel(); return true; });
+ipcMain.handle('leyline:addons', async (_e, flavor) => {
+  if (process.env.LEYLINE_DEMO) return ['BigWigs', 'DBM-Core', 'Details', 'ElvUI', 'Plater', 'WeakAuras'].map((name) => ({ name, title: name === 'ElvUI' ? 'ElvUI (Tukui)' : name }));
+  if (!/^_[a-z0-9_]+_$/i.test(String(flavor))) return []; // a game version folder, nothing else
+  return listAddons(settings.wowRoot, flavor);
+});
 ipcMain.handle('leyline:run', (_e, run) => runDetails(run));
 ipcMain.handle('leyline:restore', (_e, req) => restore(req || {}));
 ipcMain.handle('leyline:computers', () => loadComputers());
@@ -519,7 +542,7 @@ ipcMain.handle('leyline:pickFolder', async () => {
 function demoSnapshot(mode) {
   const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
   const flavors = [
-    { id: '_retail_', enabled: true, addons: true }, { id: '_classic_era_', enabled: true, addons: false },
+    { id: '_retail_', enabled: true, addons: true, skip: { addons: ['BigWigs'], settings: ['ElvUI', 'BigWigs'] } }, { id: '_classic_era_', enabled: true, addons: false },
     { id: '_forever_', enabled: true, addons: true }, { id: '_classic_', enabled: false, addons: true },
   ];
   const item = (f, p, t = 0) => ({ item: `${f}/${p}`, ok: true, transfers: t, deletes: 0, ms: 900 });
@@ -555,7 +578,7 @@ function demoComputers() {
 }
 
 function demoRun(run) {
-  const files = (dir, backup, list) => list.map(([p, action]) => ({ path: p, action, dir, backup: action === 'added' ? null : backup }));
+  const files = (dir, backup, list) => list.map(([p, action]) => ({ path: p, action, dir, backup: action === 'added' ? null : backup, conflict: p.endsWith('Details.lua') }));
   return {
     run, machine: settings.machine, time: new Date(Date.now() - 3 * 60000).toISOString(), backups: { local: true, nas: true },
     undone: { '_forever_/AddOns': ['LFGForever/LFGForever.toc', 'LFGForever/core.lua'] },
@@ -585,6 +608,7 @@ async function captureScreens(dir) {
     await wait(700);
     // History: open the newest sync's details too
     if (p === 'history') { await win.webContents.executeJavaScript(`document.querySelector('.hrow[data-run]')?.click()`); await wait(500); }
+    if (p === 'versions') { await win.webContents.executeJavaScript(`document.querySelector('.v-link')?.click()`); await wait(500); }
     const img = await win.webContents.capturePage();
     await writeFile(path.join(dir, `${process.env.LEYLINE_SCREENSHOT_PREFIX || ''}${p}.png`), img.toPNG());
   }

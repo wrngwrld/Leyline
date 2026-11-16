@@ -85,7 +85,10 @@ export function parseChanges(logs, local, remote) {
   const roots = { Path1: [local], Path2: [remote, remote.replace(/^[^:/\\]+:/, '')] };
   const relFor = (side, full) => {
     for (const root of roots[side]) { const rel = relTo(root, full); if (rel) return rel; }
-    return null;
+    // conflicts are logged with the path inside the folder instead of the full one;
+    // accept it only when bisync listed that very path as changed
+    const rel = safeRel(slash(full));
+    return rel && (seen.Path1.has(rel) || seen.Path2.has(rel)) ? rel : null;
   };
   for (const l of logs) {
     if (l.object) continue;
@@ -101,7 +104,10 @@ export function parseChanges(logs, local, remote) {
       if (!rel) continue;
       // copied onto an existing file → its old version went to that side's history
       const added = seen[from].get(rel) === 'new' && !seen[to].has(rel);
-      changes.push({ path: rel, action: added ? 'added' : 'updated', dir: to === 'Path1' ? 'in' : 'out', backup: added ? null : to === 'Path1' ? 'local' : 'nas' });
+      const change = { path: rel, action: added ? 'added' : 'updated', dir: to === 'Path1' ? 'in' : 'out', backup: added ? null : to === 'Path1' ? 'local' : 'nas' };
+      // changed on both sides: the newer one won, the other went to the history
+      if (seen[from].has(rel) && seen[to].has(rel)) { change.conflict = true; change.action = 'updated'; change.backup = to === 'Path1' ? 'local' : 'nas'; }
+      changes.push(change);
       continue;
     }
     m = /^- (Path[12])\s+Queue delete\s+- (.+)$/.exec(msg);
@@ -155,15 +161,28 @@ export class SyncEngine {
   env() { return { ...process.env, ...(this.cfg.env || {}) }; }
 
   async prepare() {
-    const { stateDir, excludes } = this.cfg;
+    const { stateDir } = this.cfg;
     await mkdir(path.join(stateDir, 'bisync'), { recursive: true });
     await mkdir(path.join(stateDir, 'history'), { recursive: true });
-    this.filtersFile = path.join(stateDir, 'filters.txt');
-    const body = excludes.map((p) => `- ${p}`).join('\n') + '\n';
+    this.filtersFile = await this.writeFilters(path.join(stateDir, 'filters.txt'), []);
+  }
+
+  /**
+   * The exclude rules for one item: the common ones plus the addons skipped there.
+   * bisync demands a resync whenever an item's filter file changes (syncItem does that on
+   * its own), so files are only rewritten when their content changes.
+   */
+  async writeFilters(file, extra) {
+    const body = [...extra, ...this.cfg.excludes.map((p) => `- ${p}`)].join('\n') + '\n';
     let old = null;
-    try { old = await readFile(this.filtersFile, 'utf8'); } catch {}
-    // bisync demands a resync whenever the filter file changes, so only write when needed.
-    if (old !== body) await writeFile(this.filtersFile, body);
+    try { old = await readFile(file, 'utf8'); } catch {}
+    if (old !== body) { await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, body); }
+    return file;
+  }
+
+  filtersFor(item) {
+    if (!item.filters?.length) return this.filtersFile;
+    return this.writeFilters(path.join(this.cfg.stateDir, 'filters', `${item.name.replace(/[\\/]/g, '__')}.txt`), item.filters);
   }
 
   /** Run rclone, collecting JSON log lines. Resolves {code, logs, stats, ms}. */
@@ -232,12 +251,21 @@ export class SyncEngine {
     }
 
     const firstRun = !existsSync(path.join(workdir, '.initialized'));
-    const resync = forceResync || firstRun;
+    // Which files this item includes (addons skipped on this computer). When that changes,
+    // in either direction, files appear or vanish from the listings without having changed,
+    // so compare everything in one go instead of treating them as new or deleted.
+    const filters = await this.filtersFor(item);
+    const rules = await readFile(filters, 'utf8');
+    const rulesFile = path.join(workdir, '.filters');
+    let lastRules = null;
+    try { lastRules = await readFile(rulesFile, 'utf8'); } catch {}
+    const rulesChanged = lastRules !== null && lastRules !== rules;
+    const resync = forceResync || firstRun || rulesChanged;
 
     const args = [
       'bisync', item.local, remote,
       '--workdir', workdir,
-      '--filters-file', this.filtersFile,
+      '--filters-file', filters,
       '--compare', 'size,modtime',
       '--modify-window', '2s',
       '--conflict-resolve', 'newer',
@@ -273,7 +301,10 @@ export class SyncEngine {
       return this.syncItem(item, { forceResync: true });
     }
 
-    if (res.code === 0) await writeFile(path.join(workdir, '.initialized'), new Date().toISOString());
+    if (res.code === 0) {
+      await writeFile(path.join(workdir, '.initialized'), new Date().toISOString());
+      await writeFile(rulesFile, rules);
+    }
     const s = res.stats || {};
     // Count file actions from the log too; stats can be missing if rclone exits early.
     const copied = res.logs.filter((l) => l.object && /^Copied/.test((l.msg || '').trim())).length;

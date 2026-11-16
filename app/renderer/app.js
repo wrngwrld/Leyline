@@ -38,7 +38,7 @@ const dur = (ms) => (ms < 1000 ? `${ms} ms` : ms < 60000 ? `${(ms / 1000).toFixe
 const bytes = (n) => (n < 1048576 ? `${Math.max(1, Math.round(n / 1024))} KB` : n < 1073741824 ? `${(n / 1048576).toFixed(n < 104857600 ? 1 : 0)} MB` : `${(n / 1073741824).toFixed(2)} GB`);
 const left = (s) => (s == null ? '' : s < 60 ? 'less than a minute left' : s < 3600 ? `about ${Math.round(s / 60)} min left` : `about ${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min left`);
 const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? '' : 's'}`;
-const TRIGGERS = { manual: 'Manual', auto: 'Automatic', 'game-closed': 'After playing', startup: 'At startup', 'files-changed': 'Files changed', restore: 'Restore' };
+const TRIGGERS = { manual: 'Manual', auto: 'Automatic', 'game-closed': 'After playing', startup: 'At startup', 'files-changed': 'Files changed', restore: 'Restore', 'addons-changed': 'Addon choice' };
 
 const ICON = {
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
@@ -284,6 +284,50 @@ function historyRows(items) {
   }).join('');
 }
 
+// ---- per-addon choices ----------------------------------------------------
+
+let openAddons = null;            // flavor id whose addon list is open on the Game versions page
+const addonCache = new Map();     // flavor id -> [{name, title}]
+let addonQuery = '';
+
+function skipSummary(f) {
+  const a = f.skip?.addons?.length || 0, st = f.skip?.settings?.length || 0;
+  if (!a && !st) return 'Every addon syncs · Choose…';
+  const parts = [a && `${plural(a, 'addon')} not synced`, st && `${st} with settings only here`].filter(Boolean);
+  return `${parts.join(', ')} · Change…`;
+}
+
+function addonPanel(f) {
+  const list = addonCache.get(f.id);
+  if (!list) return `<div class="apanel"><div class="d-note">Looking for addons…</div></div>`;
+  const skipA = new Set(f.skip?.addons || []), skipS = new Set(f.skip?.settings || []);
+  // addons that are skipped but no longer installed stay listed, so they can be switched back on
+  const names = [...new Map([...[...skipA, ...skipS].map((name) => ({ name, title: '' })), ...list].map((x) => [x.name, x])).values()]
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  const filesOff = f.addons === false;
+  const rows = names.map((x) => {
+    const hide = addonQuery && !`${x.name} ${x.title}`.toLowerCase().includes(addonQuery.toLowerCase());
+    return `<div class="arow" data-flavor="${esc(f.id)}" data-name="${esc(x.name)}" ${hide ? 'hidden' : ''}>
+      <div class="a-name"><span class="mono">${esc(x.name)}</span>${x.title && x.title !== x.name ? `<small>${esc(x.title)}</small>` : ''}${!list.some((l) => l.name === x.name) ? '<small>not installed here</small>' : ''}</div>
+      <label class="toggle sm" title="${filesOff ? 'Addons are switched off for this whole version' : 'The addon folder in Interface/AddOns'}">Files <span class="switch"><input type="checkbox" data-a="addons" ${!skipA.has(x.name) && !filesOff ? 'checked' : ''} ${filesOff ? 'disabled' : ''}><span></span></span></label>
+      <label class="toggle sm" title="Its saved settings (${esc(x.name)}.lua under WTF)">Settings <span class="switch"><input type="checkbox" data-a="settings" ${!skipS.has(x.name) ? 'checked' : ''}><span></span></span></label>
+    </div>`;
+  }).join('');
+  return `<div class="apanel">
+    <div class="a-head"><input class="input" id="addon-search" placeholder="Search ${esc(plural(names.length, 'addon'))}" value="${esc(addonQuery)}">
+      <button class="btn ghost sm" data-act="close-addons">Done</button></div>
+    <div class="d-note">Switched off here means this computer neither sends nor receives it. Your other computers keep syncing it, and nothing is deleted.</div>
+    <div class="alist">${rows || '<div class="d-note">No addons installed for this version.</div>'}</div>
+  </div>`;
+}
+
+async function toggleAddons(id) {
+  openAddons = openAddons === id ? null : id;
+  addonQuery = '';
+  render(true, true);
+  if (openAddons && !addonCache.has(id)) { addonCache.set(id, await api.addons(id)); if (openAddons === id) render(true, true); }
+}
+
 // ---- computers --------------------------------------------------------------
 
 let comp = null; // { ok, list, me, fetched, error } from the main process
@@ -301,8 +345,8 @@ function computerRow(m, me) {
     : seenMs > 30 * 86_400_000 ? `<span class="pill">Last seen ${esc(rel(m.seen))}</span>` : '';
   const sub = [OS[m.platform] || m.platform, `Leyline ${m.version || '?'}`, `last sync ${rel(m.lastSync)}`, (m.flavors || []).map(flavorName).join(', ')].filter(Boolean).join(' · ');
   const icon = m.platform === 'darwin'
-    ? '<svg viewBox="0 0 24 24" class="c-ic"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2.5 19h19"/></svg>'
-    : '<svg viewBox="0 0 24 24" class="c-ic"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16v4"/></svg>';
+    ? '<svg viewBox="0 0 24 24" class="c-ic"><rect x="5" y="5" width="14" height="10" rx="1.5"/><path d="M3 15h18l-1.2 3.2a1 1 0 0 1-.9.6H5.1a1 1 0 0 1-.9-.6z"/></svg>'
+    : '<svg viewBox="0 0 24 24" class="c-ic"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M12 16v3.5M8 19.5h8"/></svg>';
   const forgetKey = JSON.stringify({ forget: m.id });
   return `<div class="hrow crow">${icon}
     <div class="h-main"><div class="h-title">${esc(m.name || 'Computer')} ${isMe ? '<span class="pill ok">This computer</span>' : ''}
@@ -379,7 +423,7 @@ function runDetailsHtml(run) {
         });
         if (by.size > 60) rows.push(`<div class="d-note">and ${by.size - 60} more addons</div>`);
       } else {
-        rows = list.slice(0, 60).map((c) => `<div class="d-row"><span class="d-act ${c.action}">${ACTION[c.action]}</span><span class="d-path" title="${esc(c.path)}">${esc(c.path)}</span>
+        rows = list.slice(0, 60).map((c) => `<div class="d-row"><span class="d-act ${c.action}">${ACTION[c.action]}</span><span class="d-path" title="${esc(c.path)}">${esc(c.path)}${c.conflict ? '<small>changed on both computers, newer kept</small>' : ''}</span>
           ${undoBtn(run, it.item, [c], can, 'this file')}</div>`);
         if (list.length > 60) rows.push(`<div class="d-note">and ${list.length - 60} more files</div>`);
       }
@@ -464,10 +508,10 @@ const PAGES = {
           const playing = state.running.includes(f.id);
           return `<div class="vrow" data-id="${esc(f.id)}">${badge(f.id)}
             <div><div class="v-name">${esc(flavorName(f.id))}${playing ? '<span class="pill play">Playing</span>' : ''}${!d ? '<span class="pill bad">Folder missing</span>' : ''}</div>
-              <div class="v-sub mono">${esc(f.id)}</div></div>
+              <div class="v-sub"><span class="mono">${esc(f.id)}</span> · <a class="v-link" data-act="choose-addons" data-id="${esc(f.id)}">${esc(skipSummary(f))}</a></div></div>
             <label class="toggle">Addons <span class="switch"><input type="checkbox" data-k="addons" ${f.addons !== false ? 'checked' : ''}><span></span></span></label>
             <label class="toggle">Sync <span class="switch"><input type="checkbox" data-k="enabled" ${f.enabled ? 'checked' : ''}><span></span></span></label>
-          </div>`;
+          </div>${openAddons === f.id ? addonPanel(f) : ''}`;
         }).join('') : `<div class="empty"><b>No game versions found</b>Choose the folder that contains _retail_, _classic_ and so on.</div>`}
       </div>
       <div class="banner">${svg('info')}<div class="b-body">New versions you install show up here switched off, so nothing syncs until you decide.
@@ -556,6 +600,7 @@ function render(force = false, keepScroll = false) {
   renderUpdate();
   if (!force && page === 'settings' && $('#upd-row')) $('#upd-row').innerHTML = updateRow(); // only this row: the rest has inputs
   if (!force && !LIVE_PAGES.has(page)) return;
+  if (!force && page === 'versions' && openAddons) return; // keep the search box steady while typing
   if (!force && page === 'overview' && $('#page .hero')) return patchOverview();
   const el = $('#page');
   const scroll = el.scrollTop;
@@ -566,6 +611,7 @@ function render(force = false, keepScroll = false) {
 function go(p) {
   page = p;
   armed = null;
+  openAddons = null;
   $$('#nav button').forEach((b) => b.classList.toggle('active', b.dataset.page === p));
   const el = $('#page');
   el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
@@ -625,6 +671,8 @@ document.addEventListener('click', async (e) => {
       return toast(`${did[0].toUpperCase()}${did.slice(1)}${r.missing ? ` (${r.missing} no longer in the backups)` : ''}. Syncing to your other computers now.`);
     }
     case 'open-backups': return api.openBackups();
+    case 'choose-addons': return toggleAddons(act.dataset.id);
+    case 'close-addons': openAddons = null; return render(true, true);
     case 'refresh-computers': comp = null; render(true, true); return loadComputers();
     case 'forget-computer': {
       if (!arm(JSON.stringify({ forget: act.dataset.id }))) return;
@@ -653,8 +701,29 @@ document.addEventListener('click', async (e) => {
   }
 });
 
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'addon-search') return;
+  addonQuery = e.target.value;
+  const q = addonQuery.toLowerCase();
+  for (const r of $$('.arow')) r.hidden = !!q && !r.textContent.toLowerCase().includes(q);
+});
+
 document.addEventListener('change', async (e) => {
   const t = e.target;
+  const arow = t.closest('.arow');
+  if (arow) {
+    const { flavor, name } = arow.dataset, k = t.dataset.a;
+    const flavors = data.settings.flavors.map((f) => {
+      if (f.id !== flavor) return f;
+      const list = new Set(f.skip?.[k] || []);
+      if (t.checked) list.delete(name); else list.add(name);
+      return { ...f, skip: { ...f.skip, [k]: [...list].sort() } };
+    });
+    data = await api.save({ flavors });
+    const link = $(`.v-link[data-id="${CSS.escape(flavor)}"]`);
+    if (link) link.textContent = skipSummary(data.settings.flavors.find((f) => f.id === flavor));
+    return;
+  }
   const row = t.closest('.vrow');
   if (row) {
     const flavors = data.settings.flavors.map((f) => (f.id === row.dataset.id ? { ...f, [t.dataset.k]: t.checked } : f));

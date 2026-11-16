@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('leyline', {
   pickFolder: () => ipcRenderer.invoke('leyline:pickFolder'),
   checkUpdates: () => ipcRenderer.invoke('leyline:checkUpdates'),
   run: (id) => ipcRenderer.invoke('leyline:run', id),
+  addons: (flavor) => ipcRenderer.invoke('leyline:addons', flavor),
   restore: (req) => ipcRenderer.invoke('leyline:restore', req),
   computers: () => ipcRenderer.invoke('leyline:computers'),
   forgetComputer: (id) => ipcRenderer.invoke('leyline:forgetComputer', id),

@@ -25,6 +25,11 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
+  ['Choose per addon what syncs on each computer', [
+    ['Features', 'Choose per addon what syncs: under Game versions, leave an addon\'s files, its settings or both out on this computer, for example to keep a different UI setup per computer. Nothing is deleted, and your other computers keep syncing it.'],
+    ['Fixes', 'History now also lists files that changed on two computers at once, marked "newer kept", so the other version can be restored.'],
+    ['Fixes', 'Clearer computer icons on the Computers page.'],
+  ]],
   ['Remember undone changes in History', ['Fixes', 'After restoring or removing files in History, the sync now shows them as Restored or Removed instead of offering the same action again, which then failed with an error.']],
   ['Undo added files from History and tidy the sync details', [
     ['Improvements', 'Undo in History now covers files a sync added too: remove a new addon or file on all your computers with one click, and a copy stays in the backups.'],

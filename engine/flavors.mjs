@@ -1,6 +1,6 @@
 // WoW game versions ("flavors"). Each one lives in its own folder under the WoW install,
 // e.g. /Applications/World of Warcraft/_retail_ or C:\Program Files (x86)\World of Warcraft\_classic_era_.
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, stat, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 /** Display names for the folders Blizzard uses. Unknown folders still work, with a generated name. */
@@ -72,11 +72,28 @@ export async function detectFlavors(wowRoot) {
   return out.sort((a, b) => (order.indexOf(a.id) + 1 || 99) - (order.indexOf(b.id) + 1 || 99) || a.id.localeCompare(b.id));
 }
 
+// rclone glob characters in a folder name must not act as wildcards
+const glob = (name) => name.replace(/[\\*?[\]{}]/g, (c) => `\\${c}`);
+
+/**
+ * rclone filter lines that leave out single addons for one part of a flavor.
+ * skip.addons: addon folders under Interface/AddOns; skip.settings: their <Name>.lua files
+ * under WTF (WoW names an addon's saved settings after its folder).
+ */
+export function skipFilters(part, skip = {}) {
+  const lines = [];
+  if (part === 'AddOns') for (const n of skip.addons || []) lines.push(`- /${glob(n)}/**`);
+  if (part === 'Account') for (const n of skip.settings || []) lines.push(`- **/SavedVariables/${glob(n)}.lua`);
+  if (part === 'SavedVariables') for (const n of skip.settings || []) lines.push(`- /${glob(n)}.lua`);
+  return lines;
+}
+
 /**
  * Turn settings into engine items.
  * @param {string} wowRoot
- * @param {{id:string, enabled?:boolean, addons?:boolean}[]} flavors
- *   addons:false syncs only settings for that flavor (e.g. when an addon manager handles it).
+ * @param {{id:string, enabled?:boolean, addons?:boolean, skip?:{addons?:string[], settings?:string[]}}[]} flavors
+ *   addons:false syncs only settings for that flavor (e.g. when an addon manager handles it);
+ *   skip leaves out single addons on this computer.
  */
 export function buildItems(wowRoot, flavors) {
   const items = [];
@@ -86,9 +103,38 @@ export function buildItems(wowRoot, flavors) {
     for (const f of enabled) {
       for (const p of PARTS.filter((x) => x.kind === kind)) {
         if (p.kind === 'addons' && f.addons === false) continue;
-        items.push({ name: `${f.id}/${p.part}`, flavor: f.id, kind: p.kind, local: path.join(wowRoot, f.id, ...p.rel) });
+        items.push({ name: `${f.id}/${p.part}`, flavor: f.id, kind: p.kind, local: path.join(wowRoot, f.id, ...p.rel), filters: skipFilters(p.part, f.skip) });
       }
     }
   }
   return items;
+}
+
+/** Addon folders installed for a flavor, with their title from the .toc file. */
+export async function listAddons(wowRoot, flavor) {
+  const dir = path.join(wowRoot, flavor, 'Interface', 'AddOns');
+  let entries;
+  try { entries = await readdir(dir, { withFileTypes: true }); } catch { return []; }
+  const out = [];
+  for (const e of entries) {
+    if (!(e.isDirectory() || (e.isSymbolicLink() && await isDir(path.join(dir, e.name))))) continue;
+    if (e.name.startsWith('.')) continue;
+    out.push({ name: e.name, title: await tocTitle(path.join(dir, e.name), e.name) });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+}
+
+async function tocTitle(dir, name) {
+  let files = [];
+  try { files = (await readdir(dir)).filter((f) => f.toLowerCase().endsWith('.toc')); } catch { return ''; }
+  // prefer <Name>.toc, then any flavor-specific one (<Name>_Mainline.toc, …)
+  files.sort((a, b) => (b.toLowerCase() === `${name.toLowerCase()}.toc`) - (a.toLowerCase() === `${name.toLowerCase()}.toc`));
+  for (const f of files) {
+    try {
+      const m = /^##\s*Title:\s*(.+)$/m.exec(await readFile(path.join(dir, f), 'utf8'));
+      // drop WoW color codes and texture tags
+      if (m) return m[1].replace(/\|c[0-9a-f]{8}|\|r|\|T[^|]*\|t|\|A[^|]*\|a/gi, '').trim();
+    } catch {}
+  }
+  return '';
 }

@@ -52,6 +52,10 @@ which direction. Any file it replaced or deleted can be put back to how it was b
 one file, one addon or the whole sync at once; Leyline then syncs the restored files to
 your other computers. Backups are kept for 30 days by default (*Settings → Keep backups*).
 
+**Per addon.** Under *Game versions → Choose…* you can leave single addons out on one
+computer: its files, its settings (`<Addon>.lua` under `WTF`), or both. That computer then
+neither sends nor receives them; the others keep syncing, and nothing is deleted.
+
 **Your computers.** The *Computers* page lists every computer that syncs with the same NAS
 folder, which Leyline version it runs, when it last synced and whether someone is playing.
 
