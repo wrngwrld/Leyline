@@ -9,7 +9,7 @@ import * as store from './settings.mjs';
 import { rclonePath, obscure, remoteEnv, remoteRoot, testConnection } from './nas.mjs';
 import { runningFlavors } from './wow.mjs';
 import { FolderWatcher, ownWrites } from './watcher.mjs';
-import { update, initUpdater, checkForUpdates, installUpdate } from './updater.mjs';
+import { update, initUpdater, checkForUpdates, checkIfStale, installUpdate } from './updater.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const asset = (f) => path.join(HERE, 'assets', f);
@@ -178,6 +178,7 @@ function overlayColors() {
 }
 
 function showWindow() {
+  checkIfStale();
   if (!win || win.isDestroyed()) createWindow();
   if (isMac) app.dock?.show();
   const reveal = () => { win.show(); win.focus(); };

@@ -25,6 +25,7 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
+  ['Check for updates hourly and when the window opens', ['Improvements', 'New versions arrive sooner: Leyline checks for updates every hour and whenever you open its window, instead of every 6 hours.']],
   ['List backed-up files for syncs that compared everything', ['Improvements', 'History can now restore files from a computer\'s first sync too: for syncs that compared everything in one go, it lists the files they replaced, taken from the backups.']],
   ['Ignore Leyline\'s own writes in the folder watcher', ['Fixes', 'No more "changes detected" and an extra sync right after files arrive from your other computers: Leyline now recognizes the files it wrote itself.']],
   ['Fix Windows title bar, first-sync progress and the Computers page', [

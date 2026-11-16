@@ -5,12 +5,14 @@ import updaterPkg from 'electron-updater';
 
 const { autoUpdater } = updaterPkg;
 const FIRST_CHECK_MS = 20_000;
-const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
+const CHECK_EVERY_MS = 60 * 60 * 1000;   // a check is one small request to GitHub
+const WINDOW_CHECK_MS = 10 * 60 * 1000; // opening the window checks too, at most this often
 
 /** status: unsupported | idle | checking | latest | downloading | ready | error */
 export const update = { status: 'idle', version: null, percent: null, error: null };
 
 let onChange = () => {};
+let lastCheck = 0;
 
 function set(patch) {
   Object.assign(update, patch);
@@ -51,7 +53,14 @@ export function initUpdater({ changed, ready }) {
 
 export function checkForUpdates() {
   if (['unsupported', 'checking', 'downloading', 'ready'].includes(update.status)) return;
+  lastCheck = Date.now();
   autoUpdater.checkForUpdates().catch(() => { /* reported through the 'error' event */ });
+}
+
+/** The window was opened: check again unless that happened a few minutes ago. */
+export function checkIfStale() {
+  // before the first scheduled check (or in a build that does not update) there is nothing to refresh
+  if (lastCheck && Date.now() - lastCheck > WINDOW_CHECK_MS) checkForUpdates();
 }
 
 /** Quit and install the downloaded update right away. */
