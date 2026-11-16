@@ -44,6 +44,7 @@ const state = {
 
 // ---- helpers ------------------------------------------------------------
 
+const nasReady = () => !!(settings.nas.host && settings.nas.share && settings.nas.user && settings.passwordEnc);
 const isConfigured = () => !!(settings.nas.host && settings.nas.share && settings.nas.user && settings.passwordEnc && settings.flavors.some((f) => f.enabled));
 
 function snapshot() {
@@ -277,7 +278,7 @@ async function startSync(trigger = 'manual', { onlyFlavors, force = false } = {}
           const items = engine.cfg.items;
           const idx = items.findIndex((i) => i.name === e.item);
           const [fl, part] = e.item.split('/');
-          state.progress = { item: e.item, label: `${flavorName(fl)} ${part === 'AddOns' ? 'addons' : 'settings'}`, index: idx + 1, total: items.length, files: state.progress?.files || 0, xfer: null };
+          state.progress = { item: e.item, label: `${flavorName(fl)} ${part === 'AddOns' ? 'addons' : 'settings'}`, index: idx + 1, total: items.length, files: state.progress?.files || 0, xfer: null, resync: !!e.resync };
           broadcast();
         } else if (e.type === 'file') {
           state.progress.files++;
@@ -369,13 +370,13 @@ async function housekeeping(eng) {
 
 /** Playing state changed: update this computer's entry so others see it right away. */
 async function announcePlaying() {
-  if (!isConfigured()) return;
+  if (!nasReady()) return;
   try { await (await nasEngine()).writeMachine(machineInfo()); } catch {}
 }
 
 async function loadComputers() {
   if (process.env.LEYLINE_DEMO) return demoComputers();
-  if (!isConfigured()) return { ok: false, error: 'Set up the NAS first.', list: [], me: settings.machineId };
+  if (!nasReady()) return { ok: false, error: 'Connect to your NAS first, under NAS.', list: [], me: settings.machineId };
   try {
     const list = await (await nasEngine()).listMachines();
     if (!list.some((m) => m.id === settings.machineId)) list.push(machineInfo()); // before its first sync

@@ -149,6 +149,7 @@ const syncLabel = (p) => `${p.label[0].toUpperCase() + p.label.slice(1)}. Settin
  * (settings are a few MB, addons gigabytes), so counting steps would mislead.
  */
 function syncPct(p) {
+  if (p.resync) return 100; // shown as a moving bar: the totals are not known yet
   const x = p.xfer;
   const frac = x?.totalBytes ? x.bytes / x.totalBytes : x?.totalTransfers ? x.transfers / x.totalTransfers : 0;
   return Math.max(3, Math.min(100, frac * 100));
@@ -158,6 +159,9 @@ function syncMeta(p) {
   const step = `Step ${p.index || 1} of ${p.total || '…'}`;
   if (!x || !x.totalTransfers) return [`${step} · comparing files…`, ""];
   const speed = x.speed ? `${bytes(x.speed)}/s` : '';
+  // A full comparison finds files while it copies, so its totals keep growing:
+  // show only what is done, not a percentage or time left that would be wrong.
+  if (p.resync) return [`${step} · comparing everything · ${plural(x.transfers, 'file')}, ${bytes(x.bytes)} so far`, speed];
   return [
     `${x.transfers.toLocaleString()} of ${plural(x.totalTransfers, 'file')} · ${bytes(x.bytes)} of ${bytes(x.totalBytes)}`,
     [speed, left(x.eta)].filter(Boolean).join(' · '),
@@ -204,7 +208,7 @@ function heroContent() {
         <h2>Weaving your settings together</h2>
         <p class="js-label">${esc(syncLabel(p))}</p>
         <div class="row"><button class="btn" data-act="cancel">${svg('stop')}Stop</button></div>
-        <div class="progress"><div class="bar"><i class="js-bar" style="width:${pct}%"></i></div>
+        <div class="progress"><div class="bar ${p.resync ? 'sweep' : ''}"><i class="js-bar" style="width:${pct}%"></i></div>
           <div class="meta"><span class="js-step">${esc(syncMeta(p)[0])}</span><span class="js-files">${esc(syncMeta(p)[1])}</span></div></div>
       </div>`;
   }
@@ -353,7 +357,8 @@ function computerRow(m, me) {
       ${!isMe && older(m.version, data.version) ? '<span class="pill">Older Leyline</span>' : ''}</div>
       <div class="h-sub">${esc(sub)}</div></div>
     ${status}
-    ${isMe ? '<span></span>' : `<button class="btn ghost sm" data-act="forget-computer" data-id="${esc(m.id)}" title="Remove it from this list. It comes back if that computer syncs again.">${armed === forgetKey ? 'Click again to remove' : 'Remove'}</button>`}</div>`;
+    ${isMe || seenMs < 30 * 86_400_000 ? '<span></span>' /* only old computers can be cleared out; active ones would come back at their next sync */
+      : `<button class="btn ghost sm" data-act="forget-computer" data-id="${esc(m.id)}" title="Take this old computer off the list. Its backups on the NAS stay.">${armed === forgetKey ? 'Click again to remove' : 'Remove'}</button>`}</div>`;
 }
 
 async function loadComputers() {
@@ -468,6 +473,7 @@ function patchOverview() {
     const p = data.state.progress || { index: 0, total: 0, files: 0, label: 'starting' };
     $('.js-label', body).textContent = syncLabel(p);
     $('.js-bar', body).style.width = `${syncPct(p)}%`;
+    $('.js-bar', body).parentElement.classList.toggle('sweep', !!p.resync);
     const [a, b] = syncMeta(p);
     $('.js-step', body).textContent = a;
     $('.js-files', body).textContent = b;

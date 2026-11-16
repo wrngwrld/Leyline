@@ -25,6 +25,12 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
+  ['Fix Windows title bar, first-sync progress and the Computers page', [
+    ['Fixes', 'Windows: the minimise, maximise and close buttons now sit on a matching title bar instead of a mismatched block.'],
+    ['Fixes', 'A first sync no longer shows totals that keep growing: it shows what has been copied so far until everything is compared.'],
+    ['Fixes', 'The Computers page works as soon as the NAS is connected, before the first sync.'],
+    ['Improvements', 'Remove on the Computers page is only offered for computers that have not synced for 30 days.'],
+  ]],
   ['Choose per addon what syncs on each computer', [
     ['Features', 'Choose per addon what syncs: under Game versions, leave an addon\'s files, its settings or both out on this computer, for example to keep a different UI setup per computer. Nothing is deleted, and your other computers keep syncing it.'],
     ['Fixes', 'History now also lists files that changed on two computers at once, marked "newer kept", so the other version can be restored.'],

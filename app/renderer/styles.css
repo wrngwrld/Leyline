@@ -143,6 +143,9 @@ button.update-card:disabled { cursor: default; opacity: .7; }
   pointer-events: none; filter: blur(10px);
 }
 .main-drag { position: absolute; top: 0; left: 0; right: 0; z-index: 2; }
+body.win .main::after { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 48px; background: var(--bg); z-index: 2; pointer-events: none; }
+body.win .main::before { top: 48px; }
+body.win .page { margin-top: 48px; height: calc(100% - 48px); padding-top: 20px; }
 .page { position: relative; z-index: 1; overflow-y: auto; height: 100%; padding: 44px 44px 48px; }
 .page > * { max-width: 920px; }
 .page { animation: in .28s ease-out; }
@@ -249,6 +252,8 @@ select.input { appearance: none; padding-right: 32px; background-image: linear-g
 .progress { margin-top: 20px; max-width: 440px; }
 .progress .bar { height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; }
 .progress .bar i { display: block; height: 100%; border-radius: 99px; background: var(--ley); transition: width .4s ease; box-shadow: 0 0 12px color-mix(in srgb, var(--ley-a) 60%, transparent); }
+.progress .bar.sweep i { width: 35% !important; animation: sweep 1.6s ease-in-out infinite; }
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
 .progress .meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 14px; margin-top: 8px; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .progress .meta .js-step { color: var(--text-2); }
 
