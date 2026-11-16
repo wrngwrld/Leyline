@@ -42,6 +42,7 @@ const state = {
   detected: [],            // flavors found in the WoW folder
   needsStart: [],          // versions held back: first sync here, NAS and this computer both have files
   alsoPlaying: [],         // [{flavor, machines:[names]}] other computers playing what runs here
+  waitingFor: [],          // [{flavor, machine}] versions waiting until another computer finished syncing them
 };
 
 // ---- helpers ------------------------------------------------------------
@@ -266,6 +267,7 @@ async function startSync(trigger = 'manual', { onlyFlavors, force = false } = {}
   broadcast();
 
   const started = new Date();
+  let busy = null;
   try {
     const env = remoteEnv(settings.nas, await obscure(await nasPassword()));
     engine = new SyncEngine({
@@ -313,8 +315,28 @@ async function startSync(trigger = 'manual', { onlyFlavors, force = false } = {}
     for (const i of engine.cfg.items) i.start = flavors.find((f) => f.id === i.flavor)?.start;
     if (!engine.cfg.items.length) { state.status = 'idle'; return; }
 
+    // Another computer is syncing one of these versions right now (its marker on the NAS is
+    // fresh): wait for it, so this one never picks up a half-uploaded update.
+    const wanted = [...new Set(engine.cfg.items.map((i) => i.flavor))];
+    const others = (await engine.readBusy().catch(() => []))
+      .filter((m) => m.id !== settings.machineId && Date.now() - new Date(m.refreshed).getTime() < BUSY_FRESH_MS);
+    const waiting = wanted.map((flavor) => ({ flavor, machine: others.find((m) => (m.flavors || []).includes(flavor))?.name }))
+      .filter((w) => w.machine);
+    state.waitingFor = [...state.waitingFor.filter((w) => !wanted.includes(w.flavor)), ...waiting];
+    if (waiting.length) {
+      engine.cfg.items = engine.cfg.items.filter((i) => !waiting.some((w) => w.flavor === i.flavor));
+      retryAfterOthers(waiting.map((w) => w.flavor), trigger);
+    }
+    if (!engine.cfg.items.length) { state.status = 'idle'; return; }
+
     // the folder watcher would otherwise see this sync's own writes as new changes
-    const syncing = flavors.map((f) => f.id).filter((id) => !held.includes(id));
+    const syncing = [...new Set(engine.cfg.items.map((i) => i.flavor))];
+
+    // tell the other computers, and keep telling them while this takes
+    const busyInfo = { id: settings.machineId, name: settings.machine, flavors: syncing, since: new Date().toISOString() };
+    const busyEngine = engine;
+    await busyEngine.markBusy(busyInfo).catch(() => {});
+    busy = { engine: busyEngine, timer: setInterval(() => busyEngine.markBusy(busyInfo).catch(() => {}), 60_000) };
     watcher.hold(syncing);
     let r;
     try { r = await engine.syncAll(); } catch (err) { watcher.release(syncing, () => false); throw err; }
@@ -363,6 +385,7 @@ async function startSync(trigger = 'manual', { onlyFlavors, force = false } = {}
     state.lastError = err.message;
     notify('Leyline could not sync', err.message);
   } finally {
+    if (busy) { clearInterval(busy.timer); busy.engine.clearBusy(settings.machineId).catch(() => {}); }
     engine = null;
     state.progress = null;
     broadcast();
@@ -372,6 +395,25 @@ async function startSync(trigger = 'manual', { onlyFlavors, force = false } = {}
       setTimeout(() => startSync(why || 'files-changed', { onlyFlavors: next }), 1500);
     }
   }
+}
+
+// ---- waiting for another computer --------------------------------------------
+
+const BUSY_FRESH_MS = 3 * 60_000;  // markers are refreshed every minute; older ones are a crashed computer
+let waitTimer = null;
+const waitFlavors = new Set();
+let waitTrigger = null;
+
+/** Try those versions again in a minute, once the other computer has (probably) finished. */
+function retryAfterOthers(flavors, trigger) {
+  for (const f of flavors) waitFlavors.add(f);
+  waitTrigger ||= trigger;
+  clearTimeout(waitTimer);
+  waitTimer = setTimeout(() => {
+    const only = [...waitFlavors], why = waitTrigger;
+    waitFlavors.clear(); waitTrigger = null;
+    startSync(why || 'auto', { onlyFlavors: only });
+  }, 60_000);
 }
 
 // ---- NAS bookkeeping: computers, backups, restore ---------------------------
@@ -663,7 +705,7 @@ function demoSnapshot(mode) {
     xfer: { bytes: 967713097, totalBytes: 3630000000, transfers: 5812, totalTransfers: 26476, speed: 10400000, eta: 512 } } });
   if (mode === 'error') Object.assign(st, { status: 'error', lastError: 'The NAS rejected the user name or password.' });
   if (mode === 'playing') st.running = ['_forever_'];
-  if (process.env.LEYLINE_DEMO_ALERTS) { st.needsStart = ['_classic_era_']; st.alsoPlaying = [{ flavor: '_forever_', machines: ['Gaming-PC'] }]; st.running = ['_forever_']; }
+  if (process.env.LEYLINE_DEMO_ALERTS) { st.needsStart = ['_classic_era_']; st.alsoPlaying = [{ flavor: '_forever_', machines: ['Gaming-PC'] }]; st.running = ['_forever_']; st.waitingFor = [{ flavor: '_retail_', machine: 'Gaming-PC' }]; }
   if (mode === 'idle') st.pending = ['_retail_'];
   return {
     settings: { ...store.publicSettings(settings), flavors, hasPassword: true, nas: { host: '192.168.1.10', share: 'leyline', user: 'player', folder: 'Leyline' } },

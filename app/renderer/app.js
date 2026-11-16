@@ -516,7 +516,10 @@ function alerts() {
   const twice = (state.alsoPlaying || []).map((x) => `
     <div class="banner warn">${svg('info')}<div class="b-body"><b>${esc(x.machines.join(' and '))} ${x.machines.length > 1 ? 'are' : 'is'} also playing ${esc(flavorName(x.flavor))} right now.</b>
       <small>Whichever computer closes the game last overwrites the other one's settings. Close it on one of them.</small></div></div>`).join('');
-  return twice + start;
+  const waiting = (state.waitingFor || []).map((w) => `
+    <div class="banner alert">${svg('sync')}<div class="b-body"><b>Waiting for ${esc(w.machine)} to finish syncing ${esc(flavorName(w.flavor))}.</b>
+      <small>So this computer gets the whole update at once instead of half of it. Leyline syncs it right after.</small></div></div>`).join('');
+  return twice + start + waiting;
 }
 
 const PAGES = {

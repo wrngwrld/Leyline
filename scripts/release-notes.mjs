@@ -25,6 +25,7 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
+  ['Wait while another computer syncs the same version', ['Improvements', 'A computer no longer picks up half of an addon update while another one is still uploading it: it waits until that sync is done, then gets everything at once.']],
   ['Count sync progress against an exact plan', [
     ['Improvements', 'Progress during a normal sync now shows exact totals from the start (files and size), so the numbers and time left no longer grow while it copies.'],
     ['Fixes', 'The same addon update now shows the same number of files on every computer; the receiving side used to count each updated file twice.'],

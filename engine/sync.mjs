@@ -8,6 +8,7 @@
 //   <root>/history/<stamp>_<machine>/<flavor>/<part>  files replaced or deleted by a sync
 //   <root>/locks/<flavor>.json                        who is playing that game version now
 //   <root>/machines/<id>.json                         one line per computer: name, version, last sync
+//   <root>/busy/<id>.json                             "this computer is syncing these versions right now"
 //
 // Local state per machine (stateDir):
 //   bisync/<flavor>/<part>/      rclone bisync listings (which files each side had)
@@ -631,6 +632,26 @@ export class SyncEngine {
     const { code } = await this.raw(['rcat', this.machinePath(info.id)], JSON.stringify(info) + '\n');
     if (code !== 0) throw new Error(`could not write computer info (rclone exit ${code})`);
   }
+
+  // ---- "syncing right now" markers -----------------------------------------
+  //
+  // A computer syncing a game version puts a marker on the NAS and refreshes it while it
+  // works, so the others wait instead of picking up a half-uploaded addon update.
+
+  busyPath(id) { return joinRemote(this.cfg.remoteRoot, 'busy', `${id}.json`); }
+
+  /** Markers of all computers: [{id, name, flavors, since, refreshed}] (stale ones included). */
+  async readBusy() {
+    const { code, out } = await this.raw(['cat', joinRemote(this.cfg.remoteRoot, 'busy'), '--include', '*.json']);
+    if (code !== 0) return [];
+    return out.split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((m) => m && m.id);
+  }
+
+  async markBusy(info) {
+    await this.raw(['rcat', this.busyPath(info.id)], JSON.stringify({ ...info, refreshed: new Date().toISOString() }) + '\n');
+  }
+
+  async clearBusy(id) { await this.raw(['deletefile', this.busyPath(id)]); }
 
   async deleteMachine(id) {
     const { code } = await this.raw(['deletefile', this.machinePath(id)]);
