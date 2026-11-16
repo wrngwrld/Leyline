@@ -397,6 +397,23 @@ async function runDetails(run) {
   if (process.env.LEYLINE_DEMO) return demoRun(run);
   const data = await store.loadRun(run);
   if (!data) return null;
+  // A sync that compared everything in one go logged no single files: list what it put in
+  // the backups instead (once, then remembered), so those files can be restored as well.
+  const blind = data.items.filter((i) => !i.changesKnown && !i.fromBackups);
+  if (blind.length && nasReady()) {
+    try {
+      const b = await (await nasEngine()).listBackups(run, data.machine, blind.map((i) => i.item));
+      for (const it of blind) {
+        const changes = [
+          ...(b.local[it.item] || []).map((p) => ({ path: p, action: 'updated', dir: 'in', backup: 'local' })),
+          ...(b.nas?.[it.item] || []).map((p) => ({ path: p, action: 'updated', dir: 'out', backup: 'nas' })),
+        ];
+        Object.assign(it, { changesKnown: true, fromBackups: true, nasUnknown: !b.nas, changeCount: changes.length, changes: changes.slice(0, 5000) });
+      }
+      // only remember it when the NAS could be read; otherwise try again next time
+      if (blind.every((i) => !i.nasUnknown)) await store.saveRun(run, data);
+    } catch { /* show it as before */ }
+  }
   const t = new Date(data.time).getTime();
   const expired = settings.keepHistoryDays > 0 && Date.now() - t > settings.keepHistoryDays * 86_400_000;
   return { ...data, backups: { local: existsSync(path.join(store.statePath(), 'history', run)), nas: !expired } };

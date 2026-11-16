@@ -403,6 +403,38 @@ export class SyncEngine {
   }
 
   /**
+   * Files a sync moved into its backups, per item: on this computer (files the NAS version
+   * replaced here) and on the NAS (files this computer's version replaced there). Used for
+   * syncs that compared everything in one go and so logged no single files.
+   * @returns {Promise<{local: Record<string,string[]>, nas: Record<string,string[]>|null}>}
+   *   nas is null when the NAS could not be read
+   */
+  async listBackups(run, machine, items) {
+    const local = {}, nas = {};
+    for (const name of items) {
+      const dir = path.join(this.cfg.stateDir, 'history', run, name);
+      try {
+        const entries = await readdir(dir, { recursive: true, withFileTypes: true });
+        local[name] = entries.filter((e) => e.isFile()).map((e) => slash(path.relative(dir, path.join(e.parentPath ?? e.path, e.name)))).sort();
+      } catch { local[name] = []; }
+    }
+    const { code, out } = await this.raw(['lsf', '-R', '--files-only', joinRemote(this.cfg.remoteRoot, 'history', `${run}_${machine}`)]);
+    if (code !== 0) {
+      // no backup folder on the NAS at all is fine (nothing replaced there); anything else is unknown
+      const probe = await this.raw(['lsf', '--dirs-only', joinRemote(this.cfg.remoteRoot, 'history')]);
+      if (probe.code !== 0) return { local, nas: null };
+      for (const name of items) nas[name] = [];
+      return { local, nas };
+    }
+    const lines = out.split('\n').map((l) => l.trim()).filter(Boolean);
+    for (const name of items) {
+      const prefix = `${name}/`;
+      nas[name] = lines.filter((l) => l.startsWith(prefix)).map((l) => l.slice(prefix.length)).sort();
+    }
+    return { local, nas };
+  }
+
+  /**
    * Undo "added" files: delete them here (the next sync removes them everywhere else).
    * A copy goes to the local history first, and the NAS keeps its copy in its history
    * when the deletion syncs, so a removal can be restored like anything else.

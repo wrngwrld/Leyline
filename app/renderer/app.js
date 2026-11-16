@@ -435,7 +435,8 @@ function runDetailsHtml(run) {
       return `<div class="d-dir">${label}</div>${rows.join('')}`;
     }).join('');
     const more = it.changeCount > (it.changes?.length || 0) ? `<div class="d-note">Only the first ${it.changes.length.toLocaleString()} of ${it.changeCount.toLocaleString()} changes are listed.</div>` : '';
-    return `<div class="d-item"><div class="d-head">${esc(partLabel(it.item))}</div>${dirs}${more}</div>`;
+    const note = it.fromBackups ? `<div class="d-note">This sync compared everything in one go, so these are the files it replaced, taken from its backups${it.nasUnknown ? ' on this computer (the NAS could not be read just now)' : ''}. Files it added are not listed.</div>` : '';
+    return `<div class="d-item"><div class="d-head">${esc(partLabel(it.item))}</div>${note}${dirs}${more}</div>`;
   }).join('');
   if (!groups) return `<div class="hdetail"><div class="d-note">This sync did not change any files.</div></div>`;
   const note = allDone ? 'Everything this sync changed has been undone.'
