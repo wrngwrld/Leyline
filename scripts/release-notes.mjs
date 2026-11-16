@@ -25,6 +25,10 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
+  ['Undo added files from History and tidy the sync details', [
+    ['Improvements', 'Undo in History now covers files a sync added too: remove a new addon or file on all your computers with one click, and a copy stays in the backups.'],
+    ['Improvements', 'Clearer sync details in History, with a note when there is nothing to undo, and a tidier download status for updates.'],
+  ]],
   ['Show changed files per sync, restore them, clean up old backups and list your computers', [
     ['Features', 'See exactly which files each sync changed: click a sync on the History page.'],
     ['Features', 'Restore files from History: put back a single file, a whole addon or everything a sync replaced or deleted, and Leyline syncs the restored files to your other computers.'],

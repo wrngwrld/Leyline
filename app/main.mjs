@@ -224,7 +224,7 @@ async function nasPassword() {
 const queued = new Set();
 let queuedTrigger = null;
 
-async function startSync(trigger = 'manual', { onlyFlavors } = {}) {
+async function startSync(trigger = 'manual', { onlyFlavors, force = false } = {}) {
   if (!isConfigured()) return;
   if (state.status === 'syncing') {
     for (const f of onlyFlavors || settings.flavors.filter((x) => x.enabled).map((x) => x.id)) queued.add(f);
@@ -253,6 +253,7 @@ async function startSync(trigger = 'manual', { onlyFlavors } = {}) {
       wowRoot: settings.wowRoot,
       flavors,
       env,
+      force,
       onEvent: (e) => {
         if (e.type === 'item-start') {
           const items = engine.cfg.items;
@@ -378,8 +379,9 @@ async function runDetails(run) {
 }
 
 /**
- * Put files back to how they were before a sync, then sync them to the other computers.
- * paths: only these files of `item`; without item: everything the sync replaced or deleted.
+ * Put files back to how they were before a sync, then sync that to the other computers:
+ * replaced and deleted files come back from the backups, added files are removed.
+ * paths: only these files of `item`; without item: everything the sync changed.
  */
 async function restore({ run, item, paths }) {
   if (state.status === 'syncing') return { ok: false, error: 'Wait until the current sync has finished.' };
@@ -393,22 +395,32 @@ async function restore({ run, item, paths }) {
   state.status = 'syncing';
   state.progress = { label: 'restoring files', index: 0, total: 0, files: 0 };
   broadcast();
-  let restored = 0, missing = 0;
+  let restored = 0, removed = 0, missing = 0;
   const flavors = new Set();
   try {
     const eng = await nasEngine();
     for (const it of items) {
       const want = paths ? new Set(paths) : null;
-      const files = (it.changes || []).filter((c) => c.backup && (!want || want.has(c.path)));
-      if (!files.length) continue;
+      const picked = (it.changes || []).filter((c) => !want || want.has(c.path));
+      const back = picked.filter((c) => c.backup);
+      const added = picked.filter((c) => c.action === 'added').map((c) => c.path);
+      if (!back.length && !added.length) continue;
       const fl = it.item.split('/')[0];
       const local = buildItems(settings.wowRoot, [{ id: fl, enabled: true, addons: true }]).find((x) => x.name === it.item)?.local;
       if (!local) continue;
-      try {
-        const r = await eng.restoreFiles({ run, machine: data.machine, item: { name: it.item, local }, files });
-        restored += r.restored; missing += r.missing.length;
-        if (r.restored) flavors.add(fl);
-      } catch { missing += files.length; }
+      const target = { name: it.item, local };
+      if (back.length) {
+        try {
+          const r = await eng.restoreFiles({ run, machine: data.machine, item: target, files: back });
+          restored += r.restored; missing += r.missing.length;
+          if (r.restored) flavors.add(fl);
+        } catch { missing += back.length; }
+      }
+      if (added.length) {
+        const r = await eng.removeFiles({ item: target, paths: added });
+        removed += r.removed; missing += r.missing.length;
+        if (r.removed) flavors.add(fl);
+      }
     }
   } catch (err) {
     return { ok: false, error: err.message };
@@ -417,9 +429,9 @@ async function restore({ run, item, paths }) {
     state.progress = null;
     broadcast();
   }
-  if (!restored) return { ok: false, error: 'The backups of these files are no longer there.' };
-  startSync('restore', { onlyFlavors: [...flavors] });
-  return { ok: true, restored, missing };
+  if (!restored && !removed) return { ok: false, error: 'Nothing to undo: these files are no longer there or their backups have been cleaned up.' };
+  startSync('restore', { onlyFlavors: [...flavors], force: true });
+  return { ok: true, restored, removed, missing };
 }
 
 // ---- folder watcher -------------------------------------------------------
@@ -541,7 +553,8 @@ function demoRun(run) {
         ['ACCOUNT/Realm/Hero/SavedVariables/Plater.lua', 'updated'], ['ACCOUNT/SavedVariables/OldAddon.lua', 'deleted']]) },
       { item: '_forever_/AddOns', changesKnown: true, changeCount: 5, changes: [
         ...files('in', 'local', [['ElvUI/Core/init.lua', 'updated'], ['ElvUI/Core/API.lua', 'updated'], ['ElvUI/ElvUI.toc', 'updated']]),
-        ...files('in', 'local', [['DBM-Core/DBM-Core.lua', 'updated'], ['DBM-Core/new.lua', 'added']])] },
+        ...files('in', 'local', [['DBM-Core/DBM-Core.lua', 'updated'], ['DBM-Core/new.lua', 'added']]),
+        ...files('out', 'nas', [['LFGForever/LFGForever.toc', 'added'], ['LFGForever/core.lua', 'added']])] },
     ],
   };
 }

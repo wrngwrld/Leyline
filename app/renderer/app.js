@@ -102,7 +102,7 @@ function updateRow() {
     idle: 'Leyline checks for updates automatically.',
     checking: 'Checking for updates…',
     latest: 'You have the newest version.',
-    downloading: `Downloading ${esc(u.version)}… ${u.percent ?? 0}%`,
+    downloading: `Downloading ${esc(u.version)}: ${u.percent ?? 0}%.`,
     ready: `Version ${esc(u.version)} is ready and installs when Leyline restarts.`,
     error: esc(u.error || 'Could not check for updates.'),
   }[u.status];
@@ -329,7 +329,18 @@ const partLabel = (item) => { const [fl, part] = item.split('/'); return `${flav
 function restoreBtn(req, label, title) {
   const key = JSON.stringify(req);
   const isArmed = armed === key;
-  return `<button class="btn sm ${isArmed ? 'primary' : ''}" data-act="restore" data-req="${esc(key)}" title="${esc(title)}">${isArmed ? 'Click again to restore' : label}</button>`;
+  return `<button class="btn sm ${isArmed ? 'primary' : ''}" data-act="restore" data-req="${esc(key)}" title="${esc(title)}">${isArmed ? 'Click again to confirm' : label}</button>`;
+}
+
+/** Button for a group of changes: put back what was replaced or deleted, remove what was added. */
+function undoBtn(run, item, cs, can, what) {
+  const back = cs.filter(can), added = cs.filter((c) => c.action === 'added');
+  if (!back.length && !added.length) return '';
+  const label = !back.length ? 'Remove' : !added.length ? 'Restore' : 'Undo';
+  const title = !back.length ? `Delete ${what} on all your computers (a copy stays in the backups)`
+    : !added.length ? `Put ${what} back to how it was before this sync`
+    : `Put ${what} back to how it was before this sync and remove what it added`;
+  return restoreBtn({ run, item, paths: [...back, ...added].map((c) => c.path) }, label, title);
 }
 
 function runDetailsHtml(run) {
@@ -337,29 +348,29 @@ function runDetailsHtml(run) {
   const d = runCache.get(run);
   if (!d) return `<div class="hdetail"><div class="d-note">No file list for this sync. Leyline records which files changed from version 0.1.4 on.</div></div>`;
   const can = (c) => c.backup && d.backups[c.backup];
-  const restorable = d.items.flatMap((i) => i.changes || []).filter(can).length;
+  const all = d.items.flatMap((i) => i.changes || []);
+  const undoable = all.filter((c) => can(c) || c.action === 'added').length;
+  const lostBackups = all.some((c) => c.backup && !can(c));
   const groups = d.items.filter((i) => !i.changesKnown || i.changes?.length).map((it) => {
     if (!it.changesKnown) return `<div class="d-item"><div class="d-head">${esc(partLabel(it.item))}</div>
       <div class="d-note">Compared in one go (first sync or recovery), so there is no list of single files.</div></div>`;
     const dirs = [['in', 'Received from your other computers'], ['out', 'Sent to the NAS']].map(([dir, label]) => {
       const list = it.changes.filter((c) => c.dir === dir);
       if (!list.length) return '';
-      const addons = it.item.endsWith('/AddOns');
       let rows;
-      if (addons) {
+      if (it.item.endsWith('/AddOns')) {
         // one row per addon folder
         const by = new Map();
         for (const c of list) { const k = c.path.split('/')[0]; if (!by.has(k)) by.set(k, []); by.get(k).push(c); }
         rows = [...by].slice(0, 60).map(([name, cs]) => {
           const counts = Object.entries(cs.reduce((a, c) => ({ ...a, [c.action]: (a[c.action] || 0) + 1 }), {})).map(([a, n]) => `${n} ${a}`).join(', ');
-          const back = cs.filter(can);
-          return `<div class="d-row"><span class="d-act">Addon</span><span class="d-path">${esc(name)} <small>${esc(plural(cs.length, 'file'))}: ${esc(counts)}</small></span>
-            ${back.length ? restoreBtn({ run, item: it.item, paths: back.map((c) => c.path) }, 'Restore', `Put ${name} back to how it was before this sync`) : ''}</div>`;
+          return `<div class="d-row"><span class="d-act">Addon</span><span class="d-path">${esc(name)}<small>${esc(plural(cs.length, 'file'))}: ${esc(counts)}</small></span>
+            ${undoBtn(run, it.item, cs, can, name)}</div>`;
         });
         if (by.size > 60) rows.push(`<div class="d-note">and ${by.size - 60} more addons</div>`);
       } else {
         rows = list.slice(0, 60).map((c) => `<div class="d-row"><span class="d-act ${c.action}">${ACTION[c.action]}</span><span class="d-path" title="${esc(c.path)}">${esc(c.path)}</span>
-          ${can(c) ? restoreBtn({ run, item: it.item, paths: [c.path] }, 'Restore', 'Put this file back to how it was before this sync') : ''}</div>`);
+          ${undoBtn(run, it.item, [c], can, 'this file')}</div>`);
         if (list.length > 60) rows.push(`<div class="d-note">and ${list.length - 60} more files</div>`);
       }
       return `<div class="d-dir">${label}</div>${rows.join('')}`;
@@ -367,15 +378,18 @@ function runDetailsHtml(run) {
     const more = it.changeCount > (it.changes?.length || 0) ? `<div class="d-note">Only the first ${it.changes.length.toLocaleString()} of ${it.changeCount.toLocaleString()} changes are listed.</div>` : '';
     return `<div class="d-item"><div class="d-head">${esc(partLabel(it.item))}</div>${dirs}${more}</div>`;
   }).join('');
-  const gone = !d.backups.local && !d.backups.nas;
-  return `<div class="hdetail">
-    ${groups || '<div class="d-note">This sync did not change any files.</div>'}
+  if (!groups) return `<div class="hdetail"><div class="d-note">This sync did not change any files.</div></div>`;
+  const note = undoable
+    ? 'Restore puts a file back to its version from before this sync, Remove deletes a file this sync added. Leyline then syncs that to your other computers, and keeps a copy of everything it replaces or removes.'
+    : lostBackups ? 'The backups of this sync have been cleaned up, so it can no longer be undone.'
+    : 'Nothing to undo here.';
+  return `<div class="hdetail">${groups}
     <div class="d-foot">
-      ${restorable ? restoreBtn({ run }, 'Undo this sync', 'Put back every file this sync replaced or deleted') : ''}
-      <span class="d-note">${gone ? 'The backups of this sync have been cleaned up.'
-        : restorable ? 'Restoring puts files back to how they were before this sync and then syncs them to your other computers. Files this sync added stay.'
-        : ''}</span>
-      <button class="btn ghost sm" data-act="open-backups">${svg('folder')}Show backups</button>
+      <span class="d-note">${note}</span>
+      <div class="d-actions">
+        <button class="btn ghost sm" data-act="open-backups">${svg('folder')}Show backups</button>
+        ${(groups.match(/data-act="restore"/g) || []).length > 1 ? restoreBtn({ run }, 'Undo this sync', 'Put back what this sync replaced or deleted and remove what it added') : ''}
+      </div>
     </div></div>`;
 }
 
@@ -590,10 +604,12 @@ document.addEventListener('click', async (e) => {
       if (!arm(act.dataset.req)) return;
       const req = JSON.parse(act.dataset.req);
       act.disabled = true;
-      act.textContent = 'Restoring…';
+      act.textContent = 'Working…';
       const r = await api.restore(req);
       render(true, true);
-      return toast(r.ok ? `Restored ${plural(r.restored, 'file')}${r.missing ? ` (${r.missing} no longer in the backups)` : ''}. Syncing to your other computers now.` : r.error, !r.ok);
+      if (!r.ok) return toast(r.error, true);
+      const did = [r.restored && `restored ${plural(r.restored, 'file')}`, r.removed && `removed ${plural(r.removed, 'file')}`].filter(Boolean).join(' and ');
+      return toast(`${did[0].toUpperCase()}${did.slice(1)}${r.missing ? ` (${r.missing} no longer there)` : ''}. Syncing to your other computers now.`);
     }
     case 'open-backups': return api.openBackups();
     case 'refresh-computers': comp = null; render(true, true); return loadComputers();

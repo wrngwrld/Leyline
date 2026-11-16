@@ -254,7 +254,9 @@ export class SyncEngine {
     // a good brake for addons but exactly what WoW does to settings: on logout it rewrites all
     // SavedVariables. Settings folders are small and every replaced file goes to history, so
     // let them through.
-    if (itemKind(item) === 'settings') args.push('--force');
+    // cfg.force: the user just restored or removed files on purpose (History), which may
+    // delete more than bisync's 50% safety limit allows in a small folder.
+    if (itemKind(item) === 'settings' || this.cfg.force) args.push('--force');
     if (resync) args.push('--resync', '--resync-mode', 'newer');
 
     this.emit({ type: 'item-start', item: item.name, resync });
@@ -367,6 +369,35 @@ export class SyncEngine {
     }
     if (!restored && missing.length) throw new Error('The backup of these files is no longer there.');
     return { restored, missing };
+  }
+
+  /**
+   * Undo "added" files: delete them here (the next sync removes them everywhere else).
+   * A copy goes to the local history first, and the NAS keeps its copy in its history
+   * when the deletion syncs, so a removal can be restored like anything else.
+   * @returns {Promise<{removed:number, missing:string[]}>}
+   */
+  async removeFiles({ item, paths }) {
+    const keep = path.join(this.cfg.stateDir, 'history', `${stamp()}-restore`, item.name);
+    let removed = 0;
+    const missing = [];
+    const dirs = new Set();
+    for (const rel of paths.map(safeRel).filter(Boolean)) {
+      const cur = path.join(item.local, rel);
+      if (!existsSync(cur)) { missing.push(rel); continue; }
+      await mkdir(path.dirname(path.join(keep, rel)), { recursive: true });
+      await copyFile(cur, path.join(keep, rel));
+      await rm(cur, { force: true });
+      removed++;
+      // remember the folders it lived in, so empty ones (a removed addon) go too
+      for (let d = path.dirname(rel); d && d !== '.'; d = path.dirname(d)) dirs.add(d);
+    }
+    for (const d of [...dirs].sort((a, b) => b.length - a.length)) {
+      const full = path.join(item.local, d);
+      // empty apart from system clutter that is never synced anyway
+      try { if (!(await readdir(full)).some((n) => !/^(\.DS_Store|Thumbs\.db|desktop\.ini)$/i.test(n))) await rm(full, { recursive: true }); } catch {}
+    }
+    return { removed, missing };
   }
 
   /**
