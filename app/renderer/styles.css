@@ -273,9 +273,9 @@ select.input { appearance: none; padding-right: 32px; background-image: linear-g
 .syncing .scene .halo { animation-duration: 1.4s; }
 @keyframes breathe { 50% { opacity: .35; transform: scale(.88); } }
 .scene text { fill: var(--text-2); font: 600 11px var(--font-ui); text-anchor: middle; }
-.scene .mote { fill: var(--ley-a); opacity: .0; }
-.scene .mote.on { animation: mote 6s ease-in-out infinite; }
-@keyframes mote { 0%,100% { opacity: 0; } 50% { opacity: .7; } }
+.scene .mote { fill: var(--ley-a); opacity: 0; offset-rotate: 0deg; animation: mote 7.8s linear infinite; }
+.syncing .scene .mote { animation-duration: 3.9s; }
+@keyframes mote { 0% { offset-distance: 0%; opacity: 0; } 15% { opacity: .75; } 85% { opacity: .75; } 100% { offset-distance: 100%; opacity: 0; } }
 
 /* ---- onboarding steps ------------------------------------------------ */
 .steps { display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px; }

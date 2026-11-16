@@ -25,6 +25,7 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
+  ['Let the overview sparks travel along the lines', ['Improvements', 'The sparks on the Overview graphic now drift along the lines between your computers and the NAS, and speed up while a sync runs.']],
   ['Stop reading addon versions from re-triggering syncs', ['Fixes', 'Fixed an endless loop on Windows in 0.1.17, where Leyline kept syncing and reporting "files changed" even though nothing had changed.']],
   ['Show addon versions across computers', ['Features', 'The Computers page now lists addons whose version differs between your computers, per game version, so you can see which one is behind or is missing an addon. Each computer shares its list after a sync.']],
   ['Prevent overlapping sync runs', ['Fixes', 'Fixed "Cannot read properties of null" sync failures when two syncs started at the same moment, for example after an addon update in two game versions.']],

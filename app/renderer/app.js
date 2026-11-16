@@ -115,8 +115,10 @@ function updateRow() {
 
 function scene() {
   // Three nodes linked by ley lines: this computer — NAS — your other computers.
-  const motes = [[120, 112], [160, 82], [262, 84], [300, 118], [188, 74]].map(([x, y], i) =>
-    `<circle class="mote on" cx="${x}" cy="${y}" r="1.6" style="animation-delay:${i * 1.1}s"/>`).join('');
+  // small sparks drift along the lines, in both directions
+  const PATHS = { a: 'M72 132 C 132 132, 150 70, 210 70', ar: 'M210 70 C 150 70, 132 132, 72 132', b: 'M210 70 C 270 70, 288 132, 348 132', br: 'M348 132 C 288 132, 270 70, 210 70' };
+  const motes = [['a', 0], ['ar', 2.6], ['a', 5.2], ['b', 1.3], ['br', 3.9], ['b', 6.5]].map(([p, delay], i) =>
+    `<circle class="mote" cx="0" cy="0" r="${i % 2 ? 1.5 : 2}" style="offset-path:path('${PATHS[p]}');animation-delay:-${delay}s"/>`).join('');
   return `
   <svg class="scene" viewBox="0 0 420 200" aria-hidden="true">
     <defs>
