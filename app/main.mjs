@@ -40,6 +40,8 @@ const state = {
   running: [],             // flavor ids of WoW versions currently running
   pending: [],             // flavors with file changes waiting to settle before they sync
   detected: [],            // flavors found in the WoW folder
+  needsStart: [],          // versions held back: first sync here, NAS and this computer both have files
+  alsoPlaying: [],         // [{flavor, machines:[names]}] other computers playing what runs here
 };
 
 // ---- helpers ------------------------------------------------------------
@@ -254,6 +256,7 @@ async function startSync(trigger = 'manual', { onlyFlavors, force = false } = {}
   // Never sync a game version while it is running: WoW rewrites its files on logout.
   const playing = await runningFlavors();
   state.running = [...playing];
+  state.needsStart = state.needsStart.filter((id) => settings.flavors.some((f) => f.id === id && f.enabled));
   const flavors = settings.flavors.filter((f) => f.enabled && !playing.has(f.id) && (!onlyFlavors || onlyFlavors.includes(f.id)));
   if (!flavors.length) { broadcast(); return; }
 
@@ -291,8 +294,23 @@ async function startSync(trigger = 'manual', { onlyFlavors, force = false } = {}
         }
       },
     });
+    // A version's first sync here, when the NAS and this computer both have files for it,
+    // waits for the user to choose: take the NAS state, or merge (newer file wins).
+    const held = [];
+    for (const f of flavors) {
+      if (f.start) continue;
+      if ((await engine.firstSyncInfo(f.id)).decide) held.push(f.id);
+    }
+    for (const id of held) if (!state.needsStart.includes(id)) {
+      state.needsStart.push(id);
+      notify(`Choose how ${flavorName(id)} starts here`, 'Your NAS already has settings and addons for it. Open Leyline to choose.');
+    }
+    engine.cfg.items = engine.cfg.items.filter((i) => !held.includes(i.flavor));
+    for (const i of engine.cfg.items) i.start = flavors.find((f) => f.id === i.flavor)?.start;
+    if (!engine.cfg.items.length) { state.status = 'idle'; return; }
+
     // the folder watcher would otherwise see this sync's own writes as new changes
-    const syncing = flavors.map((f) => f.id);
+    const syncing = flavors.map((f) => f.id).filter((id) => !held.includes(id));
     watcher.hold(syncing);
     let r;
     try { r = await engine.syncAll(); } catch (err) { watcher.release(syncing, () => false); throw err; }
@@ -328,6 +346,13 @@ async function startSync(trigger = 'manual', { onlyFlavors, force = false } = {}
       state.lastError = r.results.find((x) => !x.ok)?.errors[0] || 'Sync failed';
       notify('Leyline could not sync', state.lastError);
     }
+    // a start choice only applies to a version's first sync: forget it once that is done,
+    // so a folder switched on later (e.g. Addons) asks again
+    let forgot = false;
+    for (const f of settings.flavors) {
+      if (f.start && syncing.includes(f.id) && !(await engine.firstSyncInfo(f.id)).firstRun) { delete f.start; forgot = true; }
+    }
+    if (forgot) await store.saveSettings(settings);
     await housekeeping(engine);
   } catch (err) {
     state.status = 'error';
@@ -517,15 +542,52 @@ function scheduleAuto() {
 let lastRunning = new Set();
 async function watchGame() {
   const now = await runningFlavors();
+  const before = lastRunning;
   const closed = [...lastRunning].filter((f) => !now.has(f));
   const changed = closed.length || [...now].some((f) => !lastRunning.has(f));
   lastRunning = now;
   if (changed) { state.running = [...now]; broadcast(); announcePlaying(); }
+  const startedHere = [...now].filter((f) => !before.has(f));
+  if (startedHere.length) checkAlsoPlaying();
+  if (!now.size && state.alsoPlaying.length) { state.alsoPlaying = []; broadcast(); }
   if (closed.length && settings.autoSync) {
     // give WoW a moment to finish writing SavedVariables
     setTimeout(() => startSync('game-closed', { onlyFlavors: closed }), 4000);
   }
 }
+
+// ---- playing on two computers ----------------------------------------------
+//
+// Two computers playing the same version: whichever closes last overwrites the other's
+// settings. While a version runs here, this computer tells the NAS every few minutes, and
+// looks whether another computer is playing the same version right now.
+
+const PLAYING_FRESH_MS = 15 * 60_000;  // a "playing" entry older than this is a crashed or offline computer
+const notifiedPlaying = new Set();      // "<machine id>|<flavor>" already warned about
+
+async function checkAlsoPlaying() {
+  if (!state.running.length || !nasReady()) return;
+  let list;
+  try { list = await (await nasEngine()).listMachines(); } catch { return; }
+  const now = Date.now();
+  const others = list.filter((m) => m.id !== settings.machineId && m.seen && now - new Date(m.seen).getTime() < PLAYING_FRESH_MS);
+  const also = state.running.map((flavor) => ({ flavor, machines: others.filter((m) => (m.playing || []).includes(flavor)) }))
+    .filter((x) => x.machines.length);
+  for (const { flavor, machines } of also) for (const m of machines) {
+    const key = `${m.id}|${flavor}`;
+    if (notifiedPlaying.has(key)) continue;
+    notifiedPlaying.add(key);
+    notify(`${m.name} is also playing ${flavorName(flavor)}`, 'Whichever computer closes the game last overwrites the other one\'s settings. Close it on one of them.');
+  }
+  // forget warnings that no longer apply, so a later overlap warns again
+  const live = new Set(also.flatMap((x) => x.machines.map((m) => `${m.id}|${x.flavor}`)));
+  for (const k of [...notifiedPlaying]) if (!live.has(k)) notifiedPlaying.delete(k);
+  state.alsoPlaying = also.map((x) => ({ flavor: x.flavor, machines: x.machines.map((m) => m.name) }));
+  broadcast();
+}
+
+// while playing: refresh this computer's entry (so others see it is still playing) and look again
+setInterval(() => { if (state.running.length) { announcePlaying(); checkAlsoPlaying(); } }, 3 * 60_000);
 
 // ---- IPC ----------------------------------------------------------------
 
@@ -546,6 +608,15 @@ ipcMain.handle('leyline:test', async (_e, { nas, password }) => {
 });
 ipcMain.handle('leyline:sync', () => { startSync('manual'); return true; });
 ipcMain.handle('leyline:cancel', () => { engine?.cancel(); return true; });
+ipcMain.handle('leyline:chooseStart', async (_e, { flavor, mode } = {}) => {
+  if (!['nas', 'merge'].includes(mode)) return snapshot();
+  settings.flavors = settings.flavors.map((f) => (f.id === flavor ? { ...f, start: mode } : f));
+  await store.saveSettings(settings);
+  state.needsStart = state.needsStart.filter((id) => id !== flavor);
+  broadcast();
+  startSync('first-sync', { onlyFlavors: [flavor] });
+  return snapshot();
+});
 ipcMain.handle('leyline:addons', async (_e, flavor) => {
   if (process.env.LEYLINE_DEMO) return ['BigWigs', 'DBM-Core', 'Details', 'ElvUI', 'Plater', 'WeakAuras'].map((name) => ({ name, title: name === 'ElvUI' ? 'ElvUI (Tukui)' : name }));
   if (!/^_[a-z0-9_]+_$/i.test(String(flavor))) return []; // a game version folder, nothing else
@@ -588,6 +659,7 @@ function demoSnapshot(mode) {
     xfer: { bytes: 967713097, totalBytes: 3630000000, transfers: 5812, totalTransfers: 26476, speed: 10400000, eta: 512 } } });
   if (mode === 'error') Object.assign(st, { status: 'error', lastError: 'The NAS rejected the user name or password.' });
   if (mode === 'playing') st.running = ['_forever_'];
+  if (process.env.LEYLINE_DEMO_ALERTS) { st.needsStart = ['_classic_era_']; st.alsoPlaying = [{ flavor: '_forever_', machines: ['Gaming-PC'] }]; st.running = ['_forever_']; }
   if (mode === 'idle') st.pending = ['_retail_'];
   return {
     settings: { ...store.publicSettings(settings), flavors, hasPassword: true, nas: { host: '192.168.1.10', share: 'leyline', user: 'player', folder: 'Leyline' } },

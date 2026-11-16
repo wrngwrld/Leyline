@@ -122,6 +122,27 @@ export function parseChanges(logs, local, remote) {
   return changes.filter((c) => !parents.has(c.path));
 }
 
+/**
+ * Which files a one-way copy from the NAS changed here, from rclone's per-file log lines:
+ * copied and its old version moved to the backup = updated; only copied = added;
+ * only moved to the backup = deleted (it was not on the NAS).
+ */
+export function parseCopyChanges(logs) {
+  const copied = new Set(), backed = new Set();
+  for (const l of logs) {
+    if (!l.object) continue;
+    const msg = (l.msg || '').trim(), obj = slash(String(l.object));
+    if (/^Copied/.test(msg)) copied.add(obj);
+    else if (/^Moved|^Deleted/.test(msg)) backed.add(obj);
+  }
+  const out = [];
+  for (const p of new Set([...copied, ...backed])) {
+    const action = copied.has(p) ? (backed.has(p) ? 'updated' : 'added') : 'deleted';
+    out.push({ path: p, action, dir: 'in', backup: action === 'added' ? null : 'local' });
+  }
+  return out.sort((a, b) => a.path.localeCompare(b.path));
+}
+
 /** A relative path inside a synced folder, never escaping it. */
 export function safeRel(rel) {
   const p = slash(String(rel || ''));
@@ -262,6 +283,27 @@ export class SyncEngine {
     const rulesChanged = lastRules !== null && lastRules !== rules;
     const resync = forceResync || firstRun || rulesChanged;
 
+    // First sync of this folder on this computer, and the user chose to start from the NAS:
+    // make it an exact copy of the NAS first. Whatever that replaces or removes here goes to
+    // the local history, so it can be restored. The resync below then finds both sides equal.
+    let adopted = null;
+    if (firstRun && item.start === 'nas') {
+      this.emit({ type: 'item-start', item: item.name, resync: true });
+      const res = await this.run(['sync', remote, item.local, '--filter-from', filters,
+        '--backup-dir', path.join(stateDir, 'history', runStamp, item.name),
+        '--create-empty-src-dirs', '--transfers', '16', '--checkers', '32']);
+      if (res.code !== 0) {
+        let errors = res.logs.filter((l) => l.level === 'error').map((l) => l.msg?.trim()).slice(0, 10);
+        // rclone reports wrong usage as plain text, not as a JSON error line
+        if (!errors.length) errors = [res.logs.map((l) => (l.msg || '').trim()).filter(Boolean).pop() || `rclone exit ${res.code}`];
+        const result = { item: item.name, ok: false, code: res.code, resync: true, ms: res.ms, transfers: 0, bytes: 0, deletes: 0, checks: 0, errors, changesKnown: false, changes: [], changeCount: 0 };
+        result.inFlux = isInFlux(errors);
+        this.emit({ type: 'item-done', ...result, changes: undefined });
+        return result;
+      }
+      adopted = { ms: res.ms, changes: parseCopyChanges(res.logs) };
+    }
+
     const args = [
       'bisync', item.local, remote,
       '--workdir', workdir,
@@ -322,9 +364,11 @@ export class SyncEngine {
       errors: res.logs.filter((l) => l.level === 'error').map((l) => l.msg?.trim()).slice(0, 10),
     };
     result.inFlux = !result.ok && isInFlux(result.errors);
-    // A resync compares everything at once and does not log single files.
-    const changes = resync ? [] : parseChanges(res.logs, item.local, remote);
-    result.changesKnown = !resync;
+    // A resync compares everything in one go and does not log single files; when it only
+    // confirmed a copy just taken from the NAS, that copy's file list says what changed.
+    const changes = adopted ? adopted.changes : resync ? [] : parseChanges(res.logs, item.local, remote);
+    result.changesKnown = adopted ? true : !resync;
+    if (adopted) { result.ms += adopted.ms; result.transfers = Math.max(result.transfers, changes.filter((c) => c.action !== 'deleted').length); result.adopted = true; }
     result.changeCount = changes.length;
     result.changes = changes.slice(0, MAX_CHANGES);
     this.emit({ type: 'item-done', ...result, changes: undefined });
@@ -349,6 +393,26 @@ export class SyncEngine {
     }
     const ok = !this.cancelled && results.every((r) => r.ok);
     return { ok, cancelled: !!this.cancelled, ms: results.reduce((a, r) => a + r.ms, 0), results, runStamp: this.runStamp };
+  }
+
+  /**
+   * Before a game version's first sync on this computer: does it need the user's decision?
+   * Only when both this computer and the NAS already have files for one of its folders.
+   * @returns {Promise<{firstRun:boolean, decide:boolean}>}
+   */
+  async firstSyncInfo(flavor) {
+    const items = this.cfg.items.filter((i) => i.flavor === flavor);
+    const first = items.filter((i) => !existsSync(path.join(this.cfg.stateDir, 'bisync', i.name, '.initialized')));
+    if (!first.length) return { firstRun: false, decide: false };
+    const junk = /^(\.DS_Store|Thumbs\.db|desktop\.ini)$/i;
+    for (const it of first) {
+      let here = false;
+      try { here = (await readdir(it.local)).some((n) => !junk.test(n)); } catch {}
+      if (!here) continue;
+      const { code, out } = await this.raw(['lsf', '--max-depth', '1', joinRemote(this.cfg.remoteRoot, 'current', it.name)]);
+      if (code === 0 && out.split('\n').some((n) => n.trim() && !junk.test(n.trim().replace(/\/$/, '')))) return { firstRun: true, decide: true };
+    }
+    return { firstRun: true, decide: false };
   }
 
   // ---- backups (history) ----------------------------------------------------

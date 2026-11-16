@@ -231,6 +231,9 @@ select.input { appearance: none; padding-right: 32px; background-image: linear-g
 .banner { display: flex; gap: 12px; align-items: flex-start; padding: 13px 15px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); margin-top: 16px; }
 .banner svg { width: 18px; height: 18px; flex: none; margin-top: 1px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .banner.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 28%, transparent); background: color-mix(in srgb, var(--ok) 7%, transparent); }
+.banner.alert { border-color: color-mix(in srgb, var(--ley-b) 35%, transparent); background: color-mix(in srgb, var(--ley-b) 7%, var(--card)); margin: 0 0 16px; }
+.banner.alert svg { color: var(--ley-b); }
+.banner.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, transparent); background: color-mix(in srgb, var(--warn) 8%, var(--card)); margin: 0 0 16px; }
 .banner.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 28%, transparent); background: color-mix(in srgb, var(--bad) 7%, transparent); }
 .banner .b-body { color: var(--text); }
 .banner .b-body small { display: block; color: var(--text-2); margin-top: 2px; }

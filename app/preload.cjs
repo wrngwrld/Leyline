@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('leyline', {
   checkUpdates: () => ipcRenderer.invoke('leyline:checkUpdates'),
   run: (id) => ipcRenderer.invoke('leyline:run', id),
   addons: (flavor) => ipcRenderer.invoke('leyline:addons', flavor),
+  chooseStart: (flavor, mode) => ipcRenderer.invoke('leyline:chooseStart', { flavor, mode }),
   restore: (req) => ipcRenderer.invoke('leyline:restore', req),
   computers: () => ipcRenderer.invoke('leyline:computers'),
   forgetComputer: (id) => ipcRenderer.invoke('leyline:forgetComputer', id),

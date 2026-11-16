@@ -38,7 +38,7 @@ const dur = (ms) => (ms < 1000 ? `${ms} ms` : ms < 60000 ? `${(ms / 1000).toFixe
 const bytes = (n) => (n < 1048576 ? `${Math.max(1, Math.round(n / 1024))} KB` : n < 1073741824 ? `${(n / 1048576).toFixed(n < 104857600 ? 1 : 0)} MB` : `${(n / 1073741824).toFixed(2)} GB`);
 const left = (s) => (s == null ? '' : s < 60 ? 'less than a minute left' : s < 3600 ? `about ${Math.round(s / 60)} min left` : `about ${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min left`);
 const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? '' : 's'}`;
-const TRIGGERS = { manual: 'Manual', auto: 'Automatic', 'game-closed': 'After playing', startup: 'At startup', 'files-changed': 'Files changed', restore: 'Restore', 'addons-changed': 'Addon choice' };
+const TRIGGERS = { manual: 'Manual', auto: 'Automatic', 'game-closed': 'After playing', startup: 'At startup', 'files-changed': 'Files changed', restore: 'Restore', 'addons-changed': 'Addon choice', 'first-sync': 'First sync' };
 
 const ICON = {
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
@@ -344,7 +344,8 @@ function computerRow(m, me) {
   const isMe = m.id === me;
   const seenMs = m.seen ? Date.now() - new Date(m.seen).getTime() : Infinity;
   // a computer that has not checked in for half a day is not "playing" any more, just gone
-  const playing = m.playing?.length && seenMs < 12 * 3600_000;
+  // computers report every few minutes while playing; an older entry is a crashed or offline one
+  const playing = m.playing?.length && seenMs < 15 * 60_000;
   const status = playing ? `<span class="pill play">Playing ${esc(m.playing.map(flavorName).join(', '))}</span>`
     : seenMs > 30 * 86_400_000 ? `<span class="pill">Last seen ${esc(rel(m.seen))}</span>` : '';
   const sub = [OS[m.platform] || m.platform, `Leyline ${m.version || '?'}`, `last sync ${rel(m.lastSync)}`, (m.flavors || []).map(flavorName).join(', ')].filter(Boolean).join(' · ');
@@ -482,8 +483,24 @@ function patchOverview() {
     body.innerHTML = heroContent();
     body.dataset.mode = mode;
   }
+  const al = alerts();
+  if ($('#ov-alerts').dataset.html !== al) { $('#ov-alerts').innerHTML = al; $('#ov-alerts').dataset.html = al; }
   $('#ov-tiles').innerHTML = versionTiles();
   $('#ov-activity').innerHTML = recentActivity();
+}
+
+/** Things that need the user: a version waiting for its start choice, or playing twice. */
+function alerts() {
+  const { state } = data;
+  const start = (state.needsStart || []).map((id) => `
+    <div class="banner alert">${svg('info')}<div class="b-body"><b>${esc(flavorName(id))} already has settings and addons on your NAS.</b>
+      <small>How should this computer start? Taking the NAS state is best when your other computers have the newer setup. Merging keeps the newer of each file. Whatever gets replaced here is kept in the backups.</small>
+      <div class="row" style="margin-top:10px"><button class="btn primary sm" data-act="start-nas" data-id="${esc(id)}">Take from the NAS</button>
+        <button class="btn sm" data-act="start-merge" data-id="${esc(id)}">Merge with this computer</button></div></div></div>`).join('');
+  const twice = (state.alsoPlaying || []).map((x) => `
+    <div class="banner warn">${svg('info')}<div class="b-body"><b>${esc(x.machines.join(' and '))} ${x.machines.length > 1 ? 'are' : 'is'} also playing ${esc(flavorName(x.flavor))} right now.</b>
+      <small>Whichever computer closes the game last overwrites the other one's settings. Close it on one of them.</small></div></div>`).join('');
+  return twice + start;
 }
 
 const PAGES = {
@@ -491,6 +508,7 @@ const PAGES = {
     const { state, history } = data;
     return `
       <div class="head"><div class="eyebrow">${esc(data.settings.machine)}</div><h1 class="title">Overview</h1></div>
+      <div id="ov-alerts">${alerts()}</div>
       <div class="card hero ${state.status === 'syncing' ? 'syncing' : ''}"><div class="hero-body" data-mode="${heroMode()}">${heroContent()}</div>${scene()}</div>
       <div id="ov-tiles">${versionTiles()}</div>
       <div id="ov-activity">${recentActivity()}</div>`;
@@ -514,7 +532,7 @@ const PAGES = {
           const d = detected.get(f.id);
           const playing = state.running.includes(f.id);
           return `<div class="vrow" data-id="${esc(f.id)}">${badge(f.id)}
-            <div><div class="v-name">${esc(flavorName(f.id))}${playing ? '<span class="pill play">Playing</span>' : ''}${!d ? '<span class="pill bad">Folder missing</span>' : ''}</div>
+            <div><div class="v-name">${esc(flavorName(f.id))}${playing ? '<span class="pill play">Playing</span>' : ''}${!d ? '<span class="pill bad">Folder missing</span>' : ''}${(state.needsStart || []).includes(f.id) ? '<a class="pill play" data-go="overview">Waiting for your choice</a>' : ''}</div>
               <div class="v-sub"><span class="mono">${esc(f.id)}</span> · <a class="v-link" data-act="choose-addons" data-id="${esc(f.id)}">${esc(skipSummary(f))}</a></div></div>
             <label class="toggle">Addons <span class="switch"><input type="checkbox" data-k="addons" ${f.addons !== false ? 'checked' : ''}><span></span></span></label>
             <label class="toggle">Sync <span class="switch"><input type="checkbox" data-k="enabled" ${f.enabled ? 'checked' : ''}><span></span></span></label>
@@ -678,6 +696,11 @@ document.addEventListener('click', async (e) => {
       return toast(`${did[0].toUpperCase()}${did.slice(1)}${r.missing ? ` (${r.missing} no longer in the backups)` : ''}. Syncing to your other computers now.`);
     }
     case 'open-backups': return api.openBackups();
+    case 'start-nas': case 'start-merge': {
+      act.disabled = true;
+      data = await api.chooseStart(act.dataset.id, act.dataset.act === 'start-nas' ? 'nas' : 'merge');
+      return render(true, true);
+    }
     case 'choose-addons': return toggleAddons(act.dataset.id);
     case 'close-addons': openAddons = null; return render(true, true);
     case 'refresh-computers': comp = null; render(true, true); return loadComputers();
