@@ -25,7 +25,7 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
-  ['Run only one sync at a time, even when two start at once', ['Fixes', 'Fixed "Cannot read properties of null" sync failures when two syncs started at the same moment, for example after an addon update in two game versions.']],
+  ['Prevent overlapping sync runs', ['Fixes', 'Fixed "Cannot read properties of null" sync failures when two syncs started at the same moment, for example after an addon update in two game versions.']],
   ['Wait while another computer syncs the same version', ['Improvements', 'A computer no longer picks up half of an addon update while another one is still uploading it: it waits until that sync is done, then gets everything at once.']],
   ['Count sync progress against an exact plan', [
     ['Improvements', 'Progress during a normal sync now shows exact totals from the start (files and size), so the numbers and time left no longer grow while it copies.'],
