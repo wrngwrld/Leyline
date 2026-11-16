@@ -10,6 +10,11 @@ contextBridge.exposeInMainWorld('leyline', {
   cancel: () => ipcRenderer.invoke('leyline:cancel'),
   pickFolder: () => ipcRenderer.invoke('leyline:pickFolder'),
   checkUpdates: () => ipcRenderer.invoke('leyline:checkUpdates'),
+  run: (id) => ipcRenderer.invoke('leyline:run', id),
+  restore: (req) => ipcRenderer.invoke('leyline:restore', req),
+  computers: () => ipcRenderer.invoke('leyline:computers'),
+  forgetComputer: (id) => ipcRenderer.invoke('leyline:forgetComputer', id),
+  openBackups: () => ipcRenderer.invoke('leyline:openBackups'),
   installUpdate: () => ipcRenderer.invoke('leyline:installUpdate'),
   onUpdate: (fn) => {
     const handler = (_e, data) => fn(data);

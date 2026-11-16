@@ -4,6 +4,7 @@
 import { app, safeStorage } from 'electron';
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import os from 'node:os';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { defaultWowRoot } from '../engine/flavors.mjs';
 
@@ -20,6 +21,9 @@ export function defaults() {
     startAtLogin: true,
     autoSync: true,
     syncIntervalMin: 10,
+    keepHistoryDays: 30,   // 0 = keep backups forever
+    machineId: '',         // stable id for this computer on the NAS (machines/<id>.json)
+    lastPrune: null,
   };
 }
 
@@ -37,7 +41,9 @@ async function writeJson(name, data) {
 export async function loadSettings() {
   const d = defaults();
   const s = await readJson('settings.json', {});
-  return { ...d, ...s, nas: { ...d.nas, ...(s.nas || {}) } };
+  const out = { ...d, ...s, nas: { ...d.nas, ...(s.nas || {}) } };
+  if (!out.machineId) { out.machineId = randomUUID(); await saveSettings(out); }
+  return out;
 }
 
 export async function saveSettings(s) { await writeJson('settings.json', s); }
@@ -62,6 +68,17 @@ export function publicSettings(s) {
 }
 
 export const statePath = () => file('state');
+
+// Per-sync file lists live next to the local backups and are cleaned up with them.
+const runFile = (run) => path.join(statePath(), 'runs', `${run}.json`);
+export async function saveRun(run, data) {
+  await mkdir(path.dirname(runFile(run)), { recursive: true });
+  await writeFile(runFile(run), JSON.stringify(data));
+}
+export async function loadRun(run) {
+  if (!/^[0-9T-]+$/.test(run || '')) return null;
+  try { return JSON.parse(await readFile(runFile(run), 'utf8')); } catch { return null; }
+}
 
 const HISTORY_MAX = 200;
 export async function loadHistory() { return readJson('history.json', []); }

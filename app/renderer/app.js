@@ -38,7 +38,7 @@ const dur = (ms) => (ms < 1000 ? `${ms} ms` : ms < 60000 ? `${(ms / 1000).toFixe
 const bytes = (n) => (n < 1048576 ? `${Math.max(1, Math.round(n / 1024))} KB` : n < 1073741824 ? `${(n / 1048576).toFixed(n < 104857600 ? 1 : 0)} MB` : `${(n / 1073741824).toFixed(2)} GB`);
 const left = (s) => (s == null ? '' : s < 60 ? 'less than a minute left' : s < 3600 ? `about ${Math.round(s / 60)} min left` : `about ${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min left`);
 const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? '' : 's'}`;
-const TRIGGERS = { manual: 'Manual', auto: 'Automatic', 'game-closed': 'After playing', startup: 'At startup', 'files-changed': 'Files changed' };
+const TRIGGERS = { manual: 'Manual', auto: 'Automatic', 'game-closed': 'After playing', startup: 'At startup', 'files-changed': 'Files changed', restore: 'Restore' };
 
 const ICON = {
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
@@ -53,13 +53,13 @@ const ICON = {
 };
 const svg = (name, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}">${ICON[name]}</svg>`;
 
-function toast(text) {
+function toast(text, bad = false) {
   const el = document.createElement('div');
   el.className = 'toast';
-  el.innerHTML = `${svg('check', 'h-ic')}<span>${esc(text)}</span>`;
-  el.querySelector('svg').style.cssText = 'width:16px;height:16px;fill:none;stroke:var(--ok);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round';
+  el.innerHTML = `${svg(bad ? 'x' : 'check', 'h-ic')}<span>${esc(text)}</span>`;
+  el.querySelector('svg').style.cssText = `width:16px;height:16px;fill:none;stroke:var(${bad ? '--bad' : '--ok'});stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;flex:none`;
   $('#toasts').append(el);
-  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 300); }, 2600);
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 300); }, bad ? 6000 : 3600);
 }
 
 // ---- shared pieces --------------------------------------------------------
@@ -274,12 +274,116 @@ function historyRows(items) {
       : !h.ok ? 'Sync failed' : h.transfers ? `Synced ${plural(h.transfers, 'file')}` : 'Checked, nothing to change';
     const versions = [...new Set(h.items.map((i) => i.item.split('/')[0]))].map(flavorName).join(', ');
     const err = !h.ok && !h.cancelled && !h.inFlux ? h.items.find((i) => !i.ok)?.error : '';
-    return `<div class="hrow">${ic}
+    const open = h.run && openRun === h.run;
+    return `<div class="hrow ${h.run ? 'clickable' : ''} ${open ? 'open' : ''}" ${h.run ? `data-run="${esc(h.run)}"` : ''}>${ic}
       <div class="h-main"><div class="h-title">${title}</div><div class="h-sub">${esc(err || versions)}</div></div>
       <span class="pill">${TRIGGERS[h.trigger] || h.trigger}</span>
       <div class="h-num">${dur(h.ms)}</div>
-      <div class="h-num">${esc(when(h.time))}</div></div>`;
+      <div class="h-num">${esc(when(h.time))}</div>
+      ${h.run ? svg('chev', 'h-chev') : '<span></span>'}</div>${open ? runDetailsHtml(h.run) : ''}`;
   }).join('');
+}
+
+// ---- computers --------------------------------------------------------------
+
+let comp = null; // { ok, list, me, fetched, error } from the main process
+
+const OS = { darwin: 'macOS', win32: 'Windows', linux: 'Linux' };
+const vnum = (v) => String(v || '0').split('.').map((n) => parseInt(n, 10) || 0);
+const older = (a, b) => { const x = vnum(a), y = vnum(b); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); return false; };
+
+function computerRow(m, me) {
+  const isMe = m.id === me;
+  const seenMs = m.seen ? Date.now() - new Date(m.seen).getTime() : Infinity;
+  // a computer that has not checked in for half a day is not "playing" any more, just gone
+  const playing = m.playing?.length && seenMs < 12 * 3600_000;
+  const status = playing ? `<span class="pill play">Playing ${esc(m.playing.map(flavorName).join(', '))}</span>`
+    : seenMs > 30 * 86_400_000 ? `<span class="pill">Last seen ${esc(rel(m.seen))}</span>` : '';
+  const sub = [OS[m.platform] || m.platform, `Leyline ${m.version || '?'}`, `last sync ${rel(m.lastSync)}`, (m.flavors || []).map(flavorName).join(', ')].filter(Boolean).join(' · ');
+  const icon = m.platform === 'darwin'
+    ? '<svg viewBox="0 0 24 24" class="c-ic"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2.5 19h19"/></svg>'
+    : '<svg viewBox="0 0 24 24" class="c-ic"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16v4"/></svg>';
+  const forgetKey = JSON.stringify({ forget: m.id });
+  return `<div class="hrow crow">${icon}
+    <div class="h-main"><div class="h-title">${esc(m.name || 'Computer')} ${isMe ? '<span class="pill ok">This computer</span>' : ''}
+      ${!isMe && older(m.version, data.version) ? '<span class="pill">Older Leyline</span>' : ''}</div>
+      <div class="h-sub">${esc(sub)}</div></div>
+    ${status}
+    ${isMe ? '<span></span>' : `<button class="btn ghost sm" data-act="forget-computer" data-id="${esc(m.id)}" title="Remove it from this list. It comes back if that computer syncs again.">${armed === forgetKey ? 'Click again to remove' : 'Remove'}</button>`}</div>`;
+}
+
+async function loadComputers() {
+  comp = await api.computers();
+  if (page === 'computers') render(true, true);
+}
+
+// ---- sync details & restore -----------------------------------------------
+
+let openRun = null;           // run id whose details are expanded on the History page
+const runCache = new Map();   // run id → details from the main process (null: none recorded)
+let armed = null;             // restore button waiting for its confirming second click
+
+const ACTION = { updated: 'Updated', added: 'Added', deleted: 'Deleted' };
+const partLabel = (item) => { const [fl, part] = item.split('/'); return `${flavorName(fl)} ${part === 'AddOns' ? 'addons' : part === 'Account' ? 'account settings' : 'settings'}`; };
+
+function restoreBtn(req, label, title) {
+  const key = JSON.stringify(req);
+  const isArmed = armed === key;
+  return `<button class="btn sm ${isArmed ? 'primary' : ''}" data-act="restore" data-req="${esc(key)}" title="${esc(title)}">${isArmed ? 'Click again to restore' : label}</button>`;
+}
+
+function runDetailsHtml(run) {
+  if (!runCache.has(run)) return `<div class="hdetail"><div class="d-note">Loading…</div></div>`;
+  const d = runCache.get(run);
+  if (!d) return `<div class="hdetail"><div class="d-note">No file list for this sync. Leyline records which files changed from version 0.1.4 on.</div></div>`;
+  const can = (c) => c.backup && d.backups[c.backup];
+  const restorable = d.items.flatMap((i) => i.changes || []).filter(can).length;
+  const groups = d.items.filter((i) => !i.changesKnown || i.changes?.length).map((it) => {
+    if (!it.changesKnown) return `<div class="d-item"><div class="d-head">${esc(partLabel(it.item))}</div>
+      <div class="d-note">Compared in one go (first sync or recovery), so there is no list of single files.</div></div>`;
+    const dirs = [['in', 'Received from your other computers'], ['out', 'Sent to the NAS']].map(([dir, label]) => {
+      const list = it.changes.filter((c) => c.dir === dir);
+      if (!list.length) return '';
+      const addons = it.item.endsWith('/AddOns');
+      let rows;
+      if (addons) {
+        // one row per addon folder
+        const by = new Map();
+        for (const c of list) { const k = c.path.split('/')[0]; if (!by.has(k)) by.set(k, []); by.get(k).push(c); }
+        rows = [...by].slice(0, 60).map(([name, cs]) => {
+          const counts = Object.entries(cs.reduce((a, c) => ({ ...a, [c.action]: (a[c.action] || 0) + 1 }), {})).map(([a, n]) => `${n} ${a}`).join(', ');
+          const back = cs.filter(can);
+          return `<div class="d-row"><span class="d-act">Addon</span><span class="d-path">${esc(name)} <small>${esc(plural(cs.length, 'file'))}: ${esc(counts)}</small></span>
+            ${back.length ? restoreBtn({ run, item: it.item, paths: back.map((c) => c.path) }, 'Restore', `Put ${name} back to how it was before this sync`) : ''}</div>`;
+        });
+        if (by.size > 60) rows.push(`<div class="d-note">and ${by.size - 60} more addons</div>`);
+      } else {
+        rows = list.slice(0, 60).map((c) => `<div class="d-row"><span class="d-act ${c.action}">${ACTION[c.action]}</span><span class="d-path" title="${esc(c.path)}">${esc(c.path)}</span>
+          ${can(c) ? restoreBtn({ run, item: it.item, paths: [c.path] }, 'Restore', 'Put this file back to how it was before this sync') : ''}</div>`);
+        if (list.length > 60) rows.push(`<div class="d-note">and ${list.length - 60} more files</div>`);
+      }
+      return `<div class="d-dir">${label}</div>${rows.join('')}`;
+    }).join('');
+    const more = it.changeCount > (it.changes?.length || 0) ? `<div class="d-note">Only the first ${it.changes.length.toLocaleString()} of ${it.changeCount.toLocaleString()} changes are listed.</div>` : '';
+    return `<div class="d-item"><div class="d-head">${esc(partLabel(it.item))}</div>${dirs}${more}</div>`;
+  }).join('');
+  const gone = !d.backups.local && !d.backups.nas;
+  return `<div class="hdetail">
+    ${groups || '<div class="d-note">This sync did not change any files.</div>'}
+    <div class="d-foot">
+      ${restorable ? restoreBtn({ run }, 'Undo this sync', 'Put back every file this sync replaced or deleted') : ''}
+      <span class="d-note">${gone ? 'The backups of this sync have been cleaned up.'
+        : restorable ? 'Restoring puts files back to how they were before this sync and then syncs them to your other computers. Files this sync added stay.'
+        : ''}</span>
+      <button class="btn ghost sm" data-act="open-backups">${svg('folder')}Show backups</button>
+    </div></div>`;
+}
+
+async function toggleRun(run) {
+  armed = null;
+  openRun = openRun === run ? null : run;
+  render(true, true);
+  if (openRun && !runCache.has(run)) { runCache.set(run, await api.run(run)); if (openRun === run) render(true, true); }
 }
 
 const recentActivity = () => (data.history.length ? `<div class="section-title"><h3>Recent activity</h3><a data-go="history">All history</a></div>
@@ -374,15 +478,30 @@ const PAGES = {
     const { history } = data;
     return `
       <div class="head"><div class="eyebrow">Activity</div><h1 class="title">History</h1>
-        <p class="sub">Every sync, and what it did. Files a sync replaced or deleted are kept on the NAS in the history folder.</p></div>
+        <p class="sub">Every sync, and what it did. Click one to see which files changed and to put files back to how they were before it.</p></div>
       <div class="card list">${history.length ? historyRows(history) : `
         <div class="empty"><svg viewBox="0 0 120 60"><path d="M12 46 C 40 46, 46 14, 60 14 S 80 46, 108 46" fill="none" stroke="url(#bm)" stroke-width="2" stroke-dasharray="3 6" stroke-linecap="round"/><circle cx="12" cy="46" r="5" fill="var(--ley-a)"/><circle cx="108" cy="46" r="5" fill="var(--ley-b)"/></svg>
         <b>No syncs yet</b>Your first sync will appear here.</div>`}</div>`;
   },
 
+  computers() {
+    const c = comp;
+    const list = !c ? `<div class="d-note pad">Asking the NAS…</div>`
+      : !c.ok ? `<div class="banner bad">${svg('x')}<div class="b-body">${esc(c.error || 'Could not read the list of computers from the NAS.')}</div></div>`
+      : c.list.slice().sort((a, b) => (b.id === c.me) - (a.id === c.me) || (b.seen || '').localeCompare(a.seen || '')).map((m) => computerRow(m, c.me)).join('');
+    return `
+      <div class="head"><div class="eyebrow">Library</div><h1 class="title">Your computers</h1>
+        <p class="sub">Every computer that syncs with this NAS folder, what it last did and whether someone is playing on it.</p></div>
+      <div class="card list">${list}</div>
+      <div class="row" style="margin-top:14px"><button class="btn ghost" data-act="refresh-computers">${svg('sync')}Refresh</button>
+        ${c?.fetched ? `<span class="d-note">Updated ${esc(rel(c.fetched))}</span>` : ''}</div>`;
+  },
+
   settings() {
     const s = data.settings;
     const opts = [5, 10, 15, 30, 60].map((m) => `<option value="${m}" ${s.syncIntervalMin === m ? 'selected' : ''}>Every ${m} minutes</option>`).join('');
+    const keep = [[7, '7 days'], [14, '14 days'], [30, '30 days'], [90, '90 days'], [0, 'Forever']]
+      .map(([d, l]) => `<option value="${d}" ${(s.keepHistoryDays ?? 30) === d ? 'selected' : ''}>${l}</option>`).join('');
     return `
       <div class="head"><div class="eyebrow">Preferences</div><h1 class="title">Settings</h1></div>
       <div class="card">
@@ -394,6 +513,8 @@ const PAGES = {
           <span class="switch"><input type="checkbox" id="auto-sync" ${s.autoSync ? 'checked' : ''}><span></span></span></div>
         <div class="srow"><div class="s-text"><div class="s-title">Background interval</div><div class="s-sub">How often to look for changes from your other computers.</div></div>
           <select class="input" id="interval" ${s.autoSync ? '' : 'disabled'}>${opts}</select></div>
+        <div class="srow"><div class="s-text"><div class="s-title">Keep backups</div><div class="s-sub">Old versions of files a sync replaced or deleted, so you can restore them from History. Cleaned up on this computer and from this computer's backups on the NAS.</div></div>
+          <select class="input" id="keep-days">${keep}</select></div>
       </div>
       <div class="card" style="margin-top:18px"><div class="srow" id="upd-row">${updateRow()}</div></div>`;
   },
@@ -401,9 +522,10 @@ const PAGES = {
 
 // ---- rendering & events ---------------------------------------------------
 
-const LIVE_PAGES = new Set(['overview', 'versions', 'history']); // safe to redraw on every update (no text inputs)
+const LIVE_PAGES = new Set(['overview', 'versions', 'history', 'computers']); // safe to redraw on every update (no text inputs)
 
-function render(force = false) {
+/** force: redraw the page even if it has inputs; keepScroll: stay where the user is. */
+function render(force = false, keepScroll = false) {
   if (!data) return;
   renderMachine();
   renderUpdate();
@@ -413,15 +535,26 @@ function render(force = false) {
   const el = $('#page');
   const scroll = el.scrollTop;
   el.innerHTML = PAGES[page]();
-  if (!force) { el.scrollTop = scroll; el.style.animation = 'none'; } else { el.style.animation = ''; el.scrollTop = 0; }
+  if (!force || keepScroll) { el.scrollTop = scroll; el.style.animation = 'none'; } else { el.style.animation = ''; el.scrollTop = 0; }
 }
 
 function go(p) {
   page = p;
+  armed = null;
   $$('#nav button').forEach((b) => b.classList.toggle('active', b.dataset.page === p));
   const el = $('#page');
   el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
   render(true);
+  if (p === 'computers') loadComputers();
+}
+
+/** Two-step buttons: the first click arms, the second (within 4 s) acts. */
+function arm(key) {
+  if (armed === key) { armed = null; return true; }
+  armed = key;
+  render(true, true);
+  setTimeout(() => { if (armed === key) { armed = null; render(true, true); } }, 4000);
+  return false;
 }
 
 // An empty folder means the root of the share (fine for a share dedicated to Leyline).
@@ -446,8 +579,29 @@ document.addEventListener('click', async (e) => {
   const target = e.target.closest('[data-go]');
   if (target) return go(target.dataset.go);
   const act = e.target.closest('[data-act]');
+  const runRow = !act && e.target.closest('.hrow[data-run]');
+  if (runRow) {
+    if (page !== 'history') { openRun = null; go('history'); }
+    return toggleRun(runRow.dataset.run);
+  }
   if (!act) return;
   switch (act.dataset.act) {
+    case 'restore': {
+      if (!arm(act.dataset.req)) return;
+      const req = JSON.parse(act.dataset.req);
+      act.disabled = true;
+      act.textContent = 'Restoring…';
+      const r = await api.restore(req);
+      render(true, true);
+      return toast(r.ok ? `Restored ${plural(r.restored, 'file')}${r.missing ? ` (${r.missing} no longer in the backups)` : ''}. Syncing to your other computers now.` : r.error, !r.ok);
+    }
+    case 'open-backups': return api.openBackups();
+    case 'refresh-computers': comp = null; render(true, true); return loadComputers();
+    case 'forget-computer': {
+      if (!arm(JSON.stringify({ forget: act.dataset.id }))) return;
+      comp = await api.forgetComputer(act.dataset.id);
+      return render(true, true);
+    }
     case 'sync': return api.sync();
     case 'cancel': return api.cancel();
     case 'pick': {
@@ -483,6 +637,7 @@ document.addEventListener('change', async (e) => {
   if (t.id === 'start-login') { data = await api.save({ startAtLogin: t.checked }); toast(t.checked ? 'Leyline will start at login' : 'Start at login turned off'); }
   if (t.id === 'auto-sync') { data = await api.save({ autoSync: t.checked }); $('#interval').disabled = !t.checked; }
   if (t.id === 'interval') { data = await api.save({ syncIntervalMin: Number(t.value) }); toast('Interval saved'); }
+  if (t.id === 'keep-days') { data = await api.save({ keepHistoryDays: Number(t.value) }); toast(Number(t.value) ? `Backups are kept for ${t.value} days` : 'Backups are kept forever'); }
 });
 
 api.onUpdate((d) => { data = d; render(); });

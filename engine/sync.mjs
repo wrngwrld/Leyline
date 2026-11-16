@@ -7,14 +7,19 @@
 //   <root>/current/<flavor>/<part>                    live copy every machine syncs against
 //   <root>/history/<stamp>_<machine>/<flavor>/<part>  files replaced or deleted by a sync
 //   <root>/locks/<flavor>.json                        who is playing that game version now
+//   <root>/machines/<id>.json                         one line per computer: name, version, last sync
 //
 // Local state per machine (stateDir):
 //   bisync/<flavor>/<part>/      rclone bisync listings (which files each side had)
 //   history/<stamp>/<flavor>/<part>  local files replaced by a sync
 //   filters.txt                  exclude rules
+//
+// Backups: when a sync replaces or deletes a file, rclone first moves the old version into
+// history/ on the side that changes: files arriving from the NAS leave their old local copy
+// in the local history, files sent to the NAS leave the old NAS copy in the NAS history.
 
 import { spawn } from 'node:child_process';
-import { mkdir, writeFile, readFile } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, readdir, rm, utimes, copyFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -45,8 +50,78 @@ export function isInFlux(errors) {
 /** 'settings' (WTF folders) or 'addons'; explicit test items are classified by their name. */
 const itemKind = (item) => item.kind || (/(^|\/)AddOns$/i.test(item.name) ? 'addons' : 'settings');
 
-const stamp = () => new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+export const stamp = () => new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 const joinRemote = (root, ...parts) => [root.replace(/\/+$/, ''), ...parts].join('/');
+
+/** "2026-11-16T08-01-20..." (a run stamp, maybe with a suffix) → Date, or null. */
+export function stampTime(name) {
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})/.exec(name || '');
+  return m ? new Date(`${m[1]}T${m[2]}:${m[3]}:${m[4]}Z`) : null;
+}
+
+const MAX_CHANGES = 5000; // per item; addon updates can touch tens of thousands of files
+const ANSI = /\x1b\[[0-9;]*m/g;
+const slash = (p) => p.replace(/\\/g, '/');
+
+/** Path of `full` inside `root`, or null. Windows paths compare case-insensitively. */
+function relTo(root, full) {
+  const r = slash(root).replace(/\/+$/, '') + '/';
+  const f = slash(full);
+  const win = process.platform === 'win32';
+  if ((win ? f.toLowerCase() : f).startsWith(win ? r.toLowerCase() : r)) return f.slice(r.length);
+  return null;
+}
+
+/**
+ * Which files a bisync run changed, from its log. bisync first lists what differs on each
+ * side ("File is new / changed / was deleted"), then queues the work ("Queue copy to Path2",
+ * "Queue delete"). Path1 is this computer, Path2 the NAS.
+ * @returns {{path:string, action:'added'|'updated'|'deleted', dir:'in'|'out', backup:'local'|'nas'|null}[]}
+ */
+export function parseChanges(logs, local, remote) {
+  const seen = { Path1: new Map(), Path2: new Map() };
+  const changes = [];
+  // bisync prints both roots as it resolved them (a remote shows as its real path)
+  const roots = { Path1: [local], Path2: [remote, remote.replace(/^[^:/\\]+:/, '')] };
+  const relFor = (side, full) => {
+    for (const root of roots[side]) { const rel = relTo(root, full); if (rel) return rel; }
+    return null;
+  };
+  for (const l of logs) {
+    if (l.object) continue;
+    const msg = (l.msg || '').replace(ANSI, '').trim();
+    const sync = /^Synching Path1 "(.*)" with Path2 "(.*)"$/.exec(msg);
+    if (sync) { roots.Path1.unshift(sync[1]); roots.Path2.unshift(sync[2]); continue; }
+    let m = /^- (Path[12])\s+(File is new|File changed|File was deleted)\b.*?\s+- (.+)$/.exec(msg);
+    if (m) { seen[m[1]].set(slash(m[3]), m[2] === 'File is new' ? 'new' : m[2] === 'File changed' ? 'changed' : 'deleted'); continue; }
+    m = /^- (Path[12])\s+Queue copy to (Path[12])\s+- (.+)$/.exec(msg);
+    if (m) {
+      const [, from, to, dest] = m;
+      const rel = relFor(to, dest);
+      if (!rel) continue;
+      // copied onto an existing file → its old version went to that side's history
+      const added = seen[from].get(rel) === 'new' && !seen[to].has(rel);
+      changes.push({ path: rel, action: added ? 'added' : 'updated', dir: to === 'Path1' ? 'in' : 'out', backup: added ? null : to === 'Path1' ? 'local' : 'nas' });
+      continue;
+    }
+    m = /^- (Path[12])\s+Queue delete\s+- (.+)$/.exec(msg);
+    if (m) {
+      const [, side, full] = m;
+      const rel = relFor(side, full);
+      if (rel) changes.push({ path: rel, action: 'deleted', dir: side === 'Path1' ? 'in' : 'out', backup: side === 'Path1' ? 'local' : 'nas' });
+    }
+  }
+  // folders show up as entries of their own; the files inside say more
+  const parents = new Set(changes.flatMap((c) => c.path.split('/').slice(0, -1).map((_, i, a) => a.slice(0, i + 1).join('/'))));
+  return changes.filter((c) => !parents.has(c.path));
+}
+
+/** A relative path inside a synced folder, never escaping it. */
+export function safeRel(rel) {
+  const p = slash(String(rel || ''));
+  if (!p || p.startsWith('/') || /^[a-z]:/i.test(p) || p.split('/').some((s) => s === '..' || s === '')) return null;
+  return p;
+}
 
 export class SyncEngine {
   /**
@@ -214,7 +289,12 @@ export class SyncEngine {
       errors: res.logs.filter((l) => l.level === 'error').map((l) => l.msg?.trim()).slice(0, 10),
     };
     result.inFlux = !result.ok && isInFlux(result.errors);
-    this.emit({ type: 'item-done', ...result });
+    // A resync compares everything at once and does not log single files.
+    const changes = resync ? [] : parseChanges(res.logs, item.local, remote);
+    result.changesKnown = !resync;
+    result.changeCount = changes.length;
+    result.changes = changes.slice(0, MAX_CHANGES);
+    this.emit({ type: 'item-done', ...result, changes: undefined });
     return result;
   }
 
@@ -235,7 +315,107 @@ export class SyncEngine {
       results.push(await this.syncItem(item));
     }
     const ok = !this.cancelled && results.every((r) => r.ok);
-    return { ok, cancelled: !!this.cancelled, ms: results.reduce((a, r) => a + r.ms, 0), results };
+    return { ok, cancelled: !!this.cancelled, ms: results.reduce((a, r) => a + r.ms, 0), results, runStamp: this.runStamp };
+  }
+
+  // ---- backups (history) ----------------------------------------------------
+
+  /**
+   * Put files back to their version from before a sync, taken from that sync's backups.
+   * The restored files get the current time, so the next sync treats them as the newest
+   * version and sends them to the NAS. Whatever they replace is kept in the local history.
+   * @param {object} o
+   * @param {string} o.run       run stamp of the sync to undo
+   * @param {string} o.machine   computer name that ran it (part of the NAS history folder)
+   * @param {{name:string, local:string}} o.item
+   * @param {{path:string, backup:'local'|'nas'}[]} o.files  paths relative to the item
+   * @returns {Promise<{restored:number, missing:string[]}>}
+   */
+  async restoreFiles({ run, machine, item, files }) {
+    const { stateDir, remoteRoot } = this.cfg;
+    const safe = files.map((f) => ({ ...f, path: safeRel(f.path) })).filter((f) => f.path && (f.backup === 'local' || f.backup === 'nas'));
+    // keep what is there now, in case the restore was a mistake
+    const keep = path.join(stateDir, 'history', `${stamp()}-restore`, item.name);
+    for (const f of safe) {
+      const cur = path.join(item.local, f.path);
+      if (existsSync(cur)) {
+        await mkdir(path.dirname(path.join(keep, f.path)), { recursive: true });
+        await copyFile(cur, path.join(keep, f.path));
+      }
+    }
+    const sources = {
+      local: path.join(stateDir, 'history', run, item.name),
+      nas: joinRemote(remoteRoot, 'history', `${run}_${machine}`, item.name),
+    };
+    let restored = 0;
+    const missing = [];
+    for (const side of ['local', 'nas']) {
+      const list = safe.filter((f) => f.backup === side).map((f) => f.path);
+      if (!list.length) continue;
+      const listFile = path.join(stateDir, `restore-${side}.txt`);
+      await writeFile(listFile, list.join('\n') + '\n');
+      // --ignore-times: copy even when size and time happen to match the current file
+      const r = await this.run(['copy', sources[side], item.local, '--files-from-raw', listFile, '--no-traverse', '--ignore-times', '--transfers', '8']);
+      await rm(listFile, { force: true });
+      const copied = new Set(r.logs.filter((l) => l.object && /^Copied/.test((l.msg || '').trim())).map((l) => slash(l.object)));
+      const now = new Date();
+      for (const p of list) {
+        if (!copied.has(p)) { missing.push(p); continue; }
+        await utimes(path.join(item.local, p), now, now);
+        restored++;
+      }
+    }
+    if (!restored && missing.length) throw new Error('The backup of these files is no longer there.');
+    return { restored, missing };
+  }
+
+  /**
+   * Delete backups older than `days` here and this computer's backups on the NAS.
+   * Other computers clean up their own NAS backups.
+   * @returns {Promise<{local:number, nas:number}>} folders removed
+   */
+  async pruneHistory(days) {
+    const { stateDir, remoteRoot, machine } = this.cfg;
+    const cutoff = Date.now() - days * 86_400_000;
+    const old = (name) => { const t = stampTime(name); return t && t.getTime() < cutoff; };
+    let local = 0, nas = 0;
+    for (const dir of ['history', 'runs']) {
+      let names = [];
+      try { names = await readdir(path.join(stateDir, dir)); } catch { continue; }
+      for (const n of names.filter(old)) { await rm(path.join(stateDir, dir, n), { recursive: true, force: true }); if (dir === 'history') local++; }
+    }
+    const { code, out } = await this.raw(['lsjson', joinRemote(remoteRoot, 'history'), '--dirs-only']);
+    if (code === 0) {
+      let dirs = [];
+      try { dirs = JSON.parse(out); } catch {}
+      const mine = dirs.map((d) => d.Name).filter((n) => n.endsWith(`_${machine}`) && old(n));
+      for (const n of mine) {
+        const r = await this.run(['purge', joinRemote(remoteRoot, 'history', n)]);
+        if (r.code === 0) nas++;
+      }
+    }
+    return { local, nas };
+  }
+
+  // ---- computers ------------------------------------------------------------
+
+  machinePath(id) { return joinRemote(this.cfg.remoteRoot, 'machines', `${id}.json`); }
+
+  /** Every computer that uses this NAS folder, from the one-line files in machines/. */
+  async listMachines() {
+    const { code, out } = await this.raw(['cat', joinRemote(this.cfg.remoteRoot, 'machines'), '--include', '*.json']);
+    if (code !== 0) return [];
+    return out.split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((m) => m && m.id);
+  }
+
+  async writeMachine(info) {
+    const { code } = await this.raw(['rcat', this.machinePath(info.id)], JSON.stringify(info) + '\n');
+    if (code !== 0) throw new Error(`could not write computer info (rclone exit ${code})`);
+  }
+
+  async deleteMachine(id) {
+    const { code } = await this.raw(['deletefile', this.machinePath(id)]);
+    return code === 0;
   }
 
   /** Stop a running sync. bisync's --recover lets the next run continue safely. */

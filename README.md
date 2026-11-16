@@ -44,7 +44,16 @@ On the NAS it keeps:
   current/<version>/SavedVariables   live copy of WTF/SavedVariables
   current/<version>/AddOns           live copy of Interface/AddOns
   history/<time>_<computer>/...      files a sync replaced or deleted
+  machines/<id>.json                 each computer's name, version and last sync
 ```
+
+**Undo and restore.** Click a sync on the *History* page to see which files it changed, in
+which direction. Any file it replaced or deleted can be put back to how it was before,
+one file, one addon or the whole sync at once; Leyline then syncs the restored files to
+your other computers. Backups are kept for 30 days by default (*Settings → Keep backups*).
+
+**Your computers.** The *Computers* page lists every computer that syncs with the same NAS
+folder, which Leyline version it runs, when it last synced and whether someone is playing.
 
 Your NAS password is encrypted with the system keychain (macOS Keychain, Windows DPAPI).
 

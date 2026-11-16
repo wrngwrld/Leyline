@@ -1,6 +1,7 @@
 // Leyline main process: tray icon, window, start at login, and the sync runner.
 import { app, BrowserWindow, Tray, Menu, ipcMain, dialog, nativeImage, Notification, nativeTheme, shell } from 'electron';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { SyncEngine } from '../engine/sync.mjs';
 import { detectFlavors, flavorName, buildItems, findWowRoot } from '../engine/flavors.mjs';
@@ -272,14 +273,20 @@ async function startSync(trigger = 'manual', { onlyFlavors } = {}) {
     const r = await engine.syncAll();
     const summary = {
       time: started.toISOString(),
+      run: r.runStamp,
       trigger,
       ok: r.ok,
       cancelled: r.cancelled,
       ms: r.ms,
       transfers: r.results.reduce((a, x) => a + x.transfers, 0),
       bytes: r.results.reduce((a, x) => a + x.bytes, 0),
-      items: r.results.map((x) => ({ item: x.item, ok: x.ok, inFlux: x.inFlux, transfers: x.transfers, deletes: x.deletes, ms: x.ms, error: x.errors[0] })),
+      items: r.results.map((x) => ({ item: x.item, ok: x.ok, inFlux: x.inFlux, transfers: x.transfers, deletes: x.deletes, ms: x.ms, error: x.errors[0], changes: x.changesKnown ? x.changeCount : null })),
     };
+    // which files changed, for the History details and restoring
+    await store.saveRun(r.runStamp, {
+      run: r.runStamp, machine: settings.machine, time: summary.time,
+      items: r.results.map((x) => ({ item: x.item, changesKnown: x.changesKnown, changeCount: x.changeCount, changes: x.changes })),
+    }).catch(() => {});
     const failed = r.results.filter((x) => !x.ok);
     // Files changed while we copied them (an addon manager at work): not an error, just try
     // again once the folder has been quiet for a while.
@@ -295,6 +302,7 @@ async function startSync(trigger = 'manual', { onlyFlavors } = {}) {
       state.lastError = r.results.find((x) => !x.ok)?.errors[0] || 'Sync failed';
       notify('Leyline could not sync', state.lastError);
     }
+    await housekeeping(engine);
   } catch (err) {
     state.status = 'error';
     state.lastError = err.message;
@@ -309,6 +317,109 @@ async function startSync(trigger = 'manual', { onlyFlavors } = {}) {
       setTimeout(() => startSync(why || 'files-changed', { onlyFlavors: next }), 1500);
     }
   }
+}
+
+// ---- NAS bookkeeping: computers, backups, restore ---------------------------
+
+/** An engine for one-off NAS work (no sync items). */
+async function nasEngine() {
+  const env = remoteEnv(settings.nas, await obscure(await nasPassword()));
+  return new SyncEngine({ rclone: rclonePath(), remoteRoot: remoteRoot(settings.nas), machine: settings.machine, stateDir: store.statePath(), items: [], env });
+}
+
+/** What other computers see about this one on the Computers page. */
+const machineInfo = () => ({
+  id: settings.machineId, name: settings.machine, platform: process.platform, version: app.getVersion(),
+  lastSync: state.lastSync, seen: new Date().toISOString(), playing: state.running,
+  flavors: settings.flavors.filter((f) => f.enabled).map((f) => f.id),
+});
+
+let computers = { ok: true, list: [], fetched: null, error: null };
+
+/** After each sync: tell the NAS this computer exists, and drop old backups once a day. */
+async function housekeeping(eng) {
+  try { await eng.writeMachine(machineInfo()); } catch { /* the sync itself worked; try again next time */ }
+  const days = settings.keepHistoryDays;
+  if (!days || (settings.lastPrune && Date.now() - new Date(settings.lastPrune).getTime() < 20 * 3600_000)) return;
+  try {
+    await eng.pruneHistory(days);
+    settings.lastPrune = new Date().toISOString();
+    await store.saveSettings(settings);
+  } catch { /* next sync tries again */ }
+}
+
+/** Playing state changed: update this computer's entry so others see it right away. */
+async function announcePlaying() {
+  if (!isConfigured()) return;
+  try { await (await nasEngine()).writeMachine(machineInfo()); } catch {}
+}
+
+async function loadComputers() {
+  if (process.env.LEYLINE_DEMO) return demoComputers();
+  if (!isConfigured()) return { ok: false, error: 'Set up the NAS first.', list: [], me: settings.machineId };
+  try {
+    const list = await (await nasEngine()).listMachines();
+    if (!list.some((m) => m.id === settings.machineId)) list.push(machineInfo()); // before its first sync
+    computers = { ok: true, list, fetched: new Date().toISOString(), error: null };
+  } catch (err) {
+    computers = { ...computers, ok: false, error: err.message };
+  }
+  return { ...computers, me: settings.machineId };
+}
+
+/** Details of one sync, plus whether its backups are still there. */
+async function runDetails(run) {
+  if (process.env.LEYLINE_DEMO) return demoRun(run);
+  const data = await store.loadRun(run);
+  if (!data) return null;
+  const t = new Date(data.time).getTime();
+  const expired = settings.keepHistoryDays > 0 && Date.now() - t > settings.keepHistoryDays * 86_400_000;
+  return { ...data, backups: { local: existsSync(path.join(store.statePath(), 'history', run)), nas: !expired } };
+}
+
+/**
+ * Put files back to how they were before a sync, then sync them to the other computers.
+ * paths: only these files of `item`; without item: everything the sync replaced or deleted.
+ */
+async function restore({ run, item, paths }) {
+  if (state.status === 'syncing') return { ok: false, error: 'Wait until the current sync has finished.' };
+  const data = await store.loadRun(run);
+  if (!data) return { ok: false, error: 'The details of this sync are no longer available.' };
+  const items = data.items.filter((i) => !item || i.item === item);
+  const playing = await runningFlavors();
+  const busy = [...new Set(items.map((i) => i.item.split('/')[0]))].filter((f) => playing.has(f));
+  if (busy.length) return { ok: false, error: `Close ${busy.map(flavorName).join(', ')} first, then restore.` };
+
+  state.status = 'syncing';
+  state.progress = { label: 'restoring files', index: 0, total: 0, files: 0 };
+  broadcast();
+  let restored = 0, missing = 0;
+  const flavors = new Set();
+  try {
+    const eng = await nasEngine();
+    for (const it of items) {
+      const want = paths ? new Set(paths) : null;
+      const files = (it.changes || []).filter((c) => c.backup && (!want || want.has(c.path)));
+      if (!files.length) continue;
+      const fl = it.item.split('/')[0];
+      const local = buildItems(settings.wowRoot, [{ id: fl, enabled: true, addons: true }]).find((x) => x.name === it.item)?.local;
+      if (!local) continue;
+      try {
+        const r = await eng.restoreFiles({ run, machine: data.machine, item: { name: it.item, local }, files });
+        restored += r.restored; missing += r.missing.length;
+        if (r.restored) flavors.add(fl);
+      } catch { missing += files.length; }
+    }
+  } catch (err) {
+    return { ok: false, error: err.message };
+  } finally {
+    state.status = 'idle';
+    state.progress = null;
+    broadcast();
+  }
+  if (!restored) return { ok: false, error: 'The backups of these files are no longer there.' };
+  startSync('restore', { onlyFlavors: [...flavors] });
+  return { ok: true, restored, missing };
 }
 
 // ---- folder watcher -------------------------------------------------------
@@ -338,7 +449,7 @@ async function watchGame() {
   const closed = [...lastRunning].filter((f) => !now.has(f));
   const changed = closed.length || [...now].some((f) => !lastRunning.has(f));
   lastRunning = now;
-  if (changed) { state.running = [...now]; broadcast(); }
+  if (changed) { state.running = [...now]; broadcast(); announcePlaying(); }
   if (closed.length && settings.autoSync) {
     // give WoW a moment to finish writing SavedVariables
     setTimeout(() => startSync('game-closed', { onlyFlavors: closed }), 4000);
@@ -364,6 +475,15 @@ ipcMain.handle('leyline:test', async (_e, { nas, password }) => {
 });
 ipcMain.handle('leyline:sync', () => { startSync('manual'); return true; });
 ipcMain.handle('leyline:cancel', () => { engine?.cancel(); return true; });
+ipcMain.handle('leyline:run', (_e, run) => runDetails(run));
+ipcMain.handle('leyline:restore', (_e, req) => restore(req || {}));
+ipcMain.handle('leyline:computers', () => loadComputers());
+ipcMain.handle('leyline:forgetComputer', async (_e, id) => {
+  if (!id || id === settings.machineId || process.env.LEYLINE_DEMO) return loadComputers();
+  try { await (await nasEngine()).deleteMachine(id); } catch {}
+  return loadComputers();
+});
+ipcMain.handle('leyline:openBackups', () => shell.openPath(path.join(store.statePath(), 'history')));
 ipcMain.handle('leyline:checkUpdates', () => { checkForUpdates(); return snapshot(); });
 ipcMain.handle('leyline:installUpdate', () => restartToUpdate());
 ipcMain.handle('leyline:pickFolder', async () => {
@@ -381,8 +501,8 @@ function demoSnapshot(mode) {
   ];
   const item = (f, p, t = 0) => ({ item: `${f}/${p}`, ok: true, transfers: t, deletes: 0, ms: 900 });
   const hist = [
-    { time: ago(3), trigger: 'game-closed', ok: true, ms: 6400, transfers: 131, bytes: 3e6, items: [item('_forever_', 'Account', 131), item('_forever_', 'AddOns')] },
-    { time: ago(14), trigger: 'auto', ok: true, ms: 41200, transfers: 0, bytes: 0, items: [item('_retail_', 'Account'), item('_classic_era_', 'Account')] },
+    { time: ago(3), run: '2026-11-16T08-00-00', trigger: 'game-closed', ok: true, ms: 6400, transfers: 131, bytes: 3e6, items: [item('_forever_', 'Account', 131), item('_forever_', 'AddOns')] },
+    { time: ago(14), run: '2026-11-16T07-49-00', trigger: 'auto', ok: true, ms: 41200, transfers: 0, bytes: 0, items: [item('_retail_', 'Account'), item('_classic_era_', 'Account')] },
     { time: ago(70), trigger: 'auto', ok: false, ms: 20100, transfers: 0, bytes: 0, items: [{ item: '_retail_/AddOns', ok: false, error: 'Could not reach the NAS. Check the address and that you are on the same network.' }] },
     { time: ago(190), trigger: 'manual', ok: true, ms: 312000, transfers: 4218, bytes: 9e8, items: [item('_forever_', 'AddOns', 4218)] },
     { time: ago(1500), trigger: 'startup', ok: true, cancelled: true, ms: 8000, transfers: 12, bytes: 0, items: [item('_retail_', 'Account', 12)] },
@@ -400,6 +520,32 @@ function demoSnapshot(mode) {
   };
 }
 
+function demoComputers() {
+  const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
+  return {
+    ok: true, fetched: ago(0), me: settings.machineId, list: [
+      { id: settings.machineId, name: settings.machine, platform: process.platform, version: app.getVersion(), lastSync: ago(3), seen: ago(3), playing: [], flavors: ['_retail_', '_classic_era_', '_forever_'] },
+      { id: 'demo-pc', name: 'Gaming-PC', platform: 'win32', version: app.getVersion(), lastSync: ago(52), seen: ago(1), playing: ['_retail_'], flavors: ['_retail_', '_forever_'] },
+      { id: 'demo-laptop', name: 'Old-Laptop', platform: 'win32', version: '0.1.2', lastSync: ago(60 * 24 * 40), seen: ago(60 * 24 * 40), playing: [], flavors: ['_retail_'] },
+    ],
+  };
+}
+
+function demoRun(run) {
+  const files = (dir, backup, list) => list.map(([p, action]) => ({ path: p, action, dir, backup: action === 'added' ? null : backup }));
+  return {
+    run, machine: settings.machine, time: new Date(Date.now() - 3 * 60000).toISOString(), backups: { local: true, nas: true },
+    items: [
+      { item: '_forever_/Account', changesKnown: true, changeCount: 4, changes: files('out', 'nas', [
+        ['ACCOUNT/SavedVariables/WeakAuras.lua', 'updated'], ['ACCOUNT/SavedVariables/Details.lua', 'updated'],
+        ['ACCOUNT/Realm/Hero/SavedVariables/Plater.lua', 'updated'], ['ACCOUNT/SavedVariables/OldAddon.lua', 'deleted']]) },
+      { item: '_forever_/AddOns', changesKnown: true, changeCount: 5, changes: [
+        ...files('in', 'local', [['ElvUI/Core/init.lua', 'updated'], ['ElvUI/Core/API.lua', 'updated'], ['ElvUI/ElvUI.toc', 'updated']]),
+        ...files('in', 'local', [['DBM-Core/DBM-Core.lua', 'updated'], ['DBM-Core/new.lua', 'added']])] },
+    ],
+  };
+}
+
 // ---- development: capture each page to PNG -------------------------------
 
 async function captureScreens(dir) {
@@ -412,6 +558,8 @@ async function captureScreens(dir) {
   for (const p of pages) {
     await win.webContents.executeJavaScript(`document.querySelector('[data-page="${p}"]').click()`);
     await wait(700);
+    // History: open the newest sync's details too
+    if (p === 'history') { await win.webContents.executeJavaScript(`document.querySelector('.hrow[data-run]')?.click()`); await wait(500); }
     const img = await win.webContents.capturePage();
     await writeFile(path.join(dir, `${process.env.LEYLINE_SCREENSHOT_PREFIX || ''}${p}.png`), img.toPNG());
   }

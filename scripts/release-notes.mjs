@@ -25,6 +25,12 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
+  ['Show changed files per sync, restore them, clean up old backups and list your computers', [
+    ['Features', 'See exactly which files each sync changed: click a sync on the History page.'],
+    ['Features', 'Restore files from History: put back a single file, a whole addon or everything a sync replaced or deleted, and Leyline syncs the restored files to your other computers.'],
+    ['Features', 'The new Computers page shows every computer syncing with your NAS, its Leyline version, its last sync and whether someone is playing on it.'],
+    ['Improvements', 'Old backups are cleaned up automatically after 30 days, so they no longer fill your NAS and disk. Choose how long to keep them under Settings.'],
+  ]],
   ['Install updates automatically from GitHub releases', ['Features', 'Leyline now updates itself: new versions download in the background and install the next time it restarts. Restart right away from the sidebar or the menu bar / tray icon; it never restarts during a sync.']],
   ['Sign and notarize the macOS app', ['Improvements', 'The macOS app is now signed and notarized by Apple. It opens without the "Open Anyway" step, and after one last confirmation, updates no longer ask again for Keychain and Local Network access.']],
   ['Ask macOS for Local Network access so the app can reach the NAS', ['Fixes', 'Fix "Could not reach the NAS" in the macOS app: Leyline now asks for Local Network access, which it needs to connect to your NAS.']],
@@ -53,7 +59,7 @@ const groups = { Features: [], Improvements: [], Fixes: [], 'Security & privacy'
 for (const commit of commits) {
   const known = curated.get(commit.subject);
   if (known) {
-    groups[known[0]].push(known[1]);
+    for (const [group, text] of Array.isArray(known[0]) ? known : [known]) groups[group].push(text);
   } else if (!internal.test(commit.subject)) {
     groups[classify(commit.subject)].push(commit.subject.replace(/^(feat|fix|docs|refactor|perf|chore)(\([^)]*\))?:\s*/i, ''));
   }
