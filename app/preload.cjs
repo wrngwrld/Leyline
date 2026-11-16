@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('leyline', {
   sync: () => ipcRenderer.invoke('leyline:sync'),
   cancel: () => ipcRenderer.invoke('leyline:cancel'),
   pickFolder: () => ipcRenderer.invoke('leyline:pickFolder'),
+  checkUpdates: () => ipcRenderer.invoke('leyline:checkUpdates'),
+  installUpdate: () => ipcRenderer.invoke('leyline:installUpdate'),
   onUpdate: (fn) => {
     const handler = (_e, data) => fn(data);
     ipcRenderer.on('leyline:update', handler);

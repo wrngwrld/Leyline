@@ -77,6 +77,42 @@ function renderMachine() {
   $('#machine').innerHTML = `<span class="dot ${dot}"></span><span class="m-name">${esc(settings.machine)}</span><span class="m-status">${esc(text)}</span>`;
 }
 
+// ---- updates --------------------------------------------------------------
+
+function renderUpdate() {
+  const u = data.update;
+  const slot = $('#update-slot');
+  if (u?.status === 'ready') {
+    const busy = data.state.status === 'syncing';
+    slot.innerHTML = `<button class="update-card" data-act="install-update" ${busy ? 'disabled' : ''}>
+      <span class="u-title">Leyline ${esc(u.version)} is ready</span>
+      <span class="u-sub">${busy ? 'Installs after this sync' : 'Restart now to update'}</span></button>`;
+  } else if (u?.status === 'downloading') {
+    slot.innerHTML = `<div class="update-card"><span class="u-title">Downloading Leyline ${esc(u.version)}</span>
+      <span class="u-sub">${u.percent ?? 0}%</span><div class="u-bar"><span style="width:${u.percent ?? 0}%"></span></div></div>`;
+  } else {
+    slot.innerHTML = '';
+  }
+}
+
+function updateRow() {
+  const u = data.update || { status: 'unsupported' };
+  const text = {
+    unsupported: 'Updates are only installed in the released app.',
+    idle: 'Leyline checks for updates automatically.',
+    checking: 'Checking for updates…',
+    latest: 'You have the newest version.',
+    downloading: `Downloading ${esc(u.version)}… ${u.percent ?? 0}%`,
+    ready: `Version ${esc(u.version)} is ready and installs when Leyline restarts.`,
+    error: esc(u.error || 'Could not check for updates.'),
+  }[u.status];
+  const button = u.status === 'ready'
+    ? `<button class="btn primary" data-act="install-update" ${data.state.status === 'syncing' ? 'disabled' : ''}>Restart now</button>`
+    : `<button class="btn" data-act="check-updates" ${['unsupported', 'checking', 'downloading'].includes(u.status) ? 'disabled' : ''}>${svg('sync')}Check for updates</button>`;
+  return `<div class="s-text"><div class="s-title">Leyline ${esc(data.version)}</div>
+    <div class="s-sub">${text} Open source, MIT licensed. Not affiliated with Blizzard Entertainment.</div></div>${button}`;
+}
+
 function scene() {
   // Three nodes linked by ley lines: this computer — NAS — your other computers.
   const motes = [[120, 112], [160, 82], [262, 84], [300, 118], [188, 74]].map(([x, y], i) =>
@@ -359,8 +395,7 @@ const PAGES = {
         <div class="srow"><div class="s-text"><div class="s-title">Background interval</div><div class="s-sub">How often to look for changes from your other computers.</div></div>
           <select class="input" id="interval" ${s.autoSync ? '' : 'disabled'}>${opts}</select></div>
       </div>
-      <div class="card" style="margin-top:18px"><div class="srow"><div class="s-text"><div class="s-title">Leyline ${esc(data.version)}</div>
-        <div class="s-sub">Open source, MIT licensed. Not affiliated with Blizzard Entertainment.</div></div></div></div>`;
+      <div class="card" style="margin-top:18px"><div class="srow" id="upd-row">${updateRow()}</div></div>`;
   },
 };
 
@@ -371,6 +406,8 @@ const LIVE_PAGES = new Set(['overview', 'versions', 'history']); // safe to redr
 function render(force = false) {
   if (!data) return;
   renderMachine();
+  renderUpdate();
+  if (!force && page === 'settings' && $('#upd-row')) $('#upd-row').innerHTML = updateRow(); // only this row: the rest has inputs
   if (!force && !LIVE_PAGES.has(page)) return;
   if (!force && page === 'overview' && $('#page .hero')) return patchOverview();
   const el = $('#page');
@@ -427,6 +464,8 @@ document.addEventListener('click', async (e) => {
       toast('NAS settings saved');
       nasResult(await api.test(nasFields()));
     });
+    case 'check-updates': data = await api.checkUpdates(); return render();
+    case 'install-update': if (!(await api.installUpdate())) toast('The update installs after the current sync'); return;
     case 'nas-test': return withBusy(act, async () => nasResult(await api.test(nasFields(), $('#password').value)));
   }
 });

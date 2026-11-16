@@ -90,11 +90,20 @@ jobs:
           - name: Windows
             os: windows-latest
             script: dist:win
-            files: dist/Leyline-Setup-*.exe
+            # installer plus the files the in-app updater reads (latest*.yml, blockmaps)
+            files: |
+              dist/Leyline-Setup-*.exe
+              dist/Leyline-Setup-*.exe.blockmap
+              dist/latest.yml
           - name: macOS
             os: macos-latest
             script: dist:mac
-            files: dist/Leyline-*.dmg
+            files: |
+              dist/Leyline-*.dmg
+              dist/Leyline-*.dmg.blockmap
+              dist/Leyline-*-mac.zip
+              dist/Leyline-*-mac.zip.blockmap
+              dist/latest-mac.yml
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7.0.1
@@ -158,6 +167,12 @@ jobs:
           codesign -dv --verbose=4 "$app/Contents/Resources/rclone/rclone" 2>&1 | grep -E "^Authority=Developer ID Application:"
           xcrun stapler validate "$app"
           spctl --assess --type execute --verbose=4 "$app"
+          # the in-app updater installs the zip; make sure it is listed and holds the notarized app
+          grep -E "^[[:space:]]+- url: Leyline-.*-mac\.zip$" dist/latest-mac.yml
+          check="$RUNNER_TEMP/zipcheck" && rm -rf "$check" && mkdir -p "$check"
+          ditto -x -k dist/Leyline-*-mac.zip "$check"
+          xcrun stapler validate "$check/Leyline.app"
+          spctl --assess --type execute --verbose=4 "$check/Leyline.app"
 
       - name: Remove signing key
         if: always() && runner.os == 'macOS'
@@ -185,7 +200,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ls -la out
-          gh release create "v$VERSION" out/Leyline-* \
+          gh release create "v$VERSION" out/Leyline-* out/latest*.yml \
             --repo "$GITHUB_REPOSITORY" \
             --title "Leyline $VERSION" \
             --notes-file out/release-notes.md

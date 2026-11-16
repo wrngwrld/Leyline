@@ -11,7 +11,7 @@
     "fetch-rclone": "node scripts/fetch-rclone.mjs",
     "icons": "node scripts/make-icons.mjs",
     "dist:win": "node scripts/fetch-rclone.mjs win32-x64 && electron-builder --win nsis --x64 --publish never",
-    "dist:mac": "node scripts/fetch-rclone.mjs darwin-arm64 && electron-builder --mac dmg --arm64 --publish never"
+    "dist:mac": "node scripts/fetch-rclone.mjs darwin-arm64 && electron-builder --mac dmg zip --arm64 --publish never"
   },
   "devDependencies": {
     "electron": "45.2.1",
@@ -72,6 +72,12 @@
           "arch": [
             "arm64"
           ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
         }
       ],
       "icon": "app/assets/icon-1024.png",
@@ -93,6 +99,16 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "notarize": true
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "wrngwrld",
+        "repo": "leyline"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "6.8.11"
   }
 }

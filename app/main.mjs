@@ -8,6 +8,7 @@ import * as store from './settings.mjs';
 import { rclonePath, obscure, remoteEnv, remoteRoot, testConnection } from './nas.mjs';
 import { runningFlavors } from './wow.mjs';
 import { FolderWatcher } from './watcher.mjs';
+import { update, initUpdater, checkForUpdates, installUpdate } from './updater.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const asset = (f) => path.join(HERE, 'assets', f);
@@ -52,12 +53,21 @@ function snapshot() {
     history: history.slice(0, 50),
     platform: process.platform,
     version: app.getVersion(),
+    update: { ...update },
   };
 }
 
 function broadcast() {
   if (win && !win.isDestroyed()) win.webContents.send('leyline:update', snapshot());
   updateTray();
+}
+
+/** Restart into the downloaded update, but never in the middle of a sync. */
+function restartToUpdate() {
+  if (update.status !== 'ready' || state.status === 'syncing') return false;
+  quitting = true;
+  installUpdate();
+  return true;
 }
 
 function notify(title, body) {
@@ -108,6 +118,9 @@ function updateTray() {
   }
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: statusLine(), enabled: false },
+    ...(update.status === 'ready'
+      ? [{ label: syncing ? `Update ${update.version} ready, installs after this sync` : `Restart to update to ${update.version}`, enabled: !syncing, click: restartToUpdate }]
+      : []),
     { type: 'separator' },
     syncing
       ? { label: 'Stop sync', click: () => engine?.cancel() }
@@ -351,6 +364,8 @@ ipcMain.handle('leyline:test', async (_e, { nas, password }) => {
 });
 ipcMain.handle('leyline:sync', () => { startSync('manual'); return true; });
 ipcMain.handle('leyline:cancel', () => { engine?.cancel(); return true; });
+ipcMain.handle('leyline:checkUpdates', () => { checkForUpdates(); return snapshot(); });
+ipcMain.handle('leyline:installUpdate', () => restartToUpdate());
 ipcMain.handle('leyline:pickFolder', async () => {
   const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'], defaultPath: settings.wowRoot, title: 'Choose your World of Warcraft folder' });
   return r.canceled ? null : r.filePaths[0];
@@ -381,6 +396,7 @@ function demoSnapshot(mode) {
   return {
     settings: { ...store.publicSettings(settings), flavors, hasPassword: true, nas: { host: '192.168.1.10', share: 'leyline', user: 'player', folder: 'Leyline' } },
     state: st, history: hist, platform: process.platform, version: app.getVersion(),
+    update: process.env.LEYLINE_DEMO_UPDATE ? { status: 'ready', version: '9.9.0', percent: 100, error: null } : { ...update },
   };
 }
 
@@ -420,6 +436,10 @@ app.whenReady().then(async () => {
   if (isMac) app.dock?.setIcon(asset('icon-512.png'));
   createTray();
   createWindow();
+  initUpdater({
+    changed: broadcast,
+    ready: (version) => notify('Leyline update ready', `Version ${version} installs the next time Leyline restarts.`),
+  });
 
   const hidden = process.argv.includes('--hidden') || app.getLoginItemSettings().wasOpenedAtLogin;
   if (hidden || process.env.LEYLINE_HIDDEN) { if (isMac) app.dock?.hide(); }

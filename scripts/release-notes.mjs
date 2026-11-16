@@ -25,6 +25,7 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
+  ['Install updates automatically from GitHub releases', ['Features', 'Leyline now updates itself: new versions download in the background and install the next time it restarts. Restart right away from the sidebar or the menu bar / tray icon; it never restarts during a sync.']],
   ['Sign and notarize the macOS app', ['Improvements', 'The macOS app is now signed and notarized by Apple. It opens without the "Open Anyway" step, and after one last confirmation, updates no longer ask again for Keychain and Local Network access.']],
   ['Ask macOS for Local Network access so the app can reach the NAS', ['Fixes', 'Fix "Could not reach the NAS" in the macOS app: Leyline now asks for Local Network access, which it needs to connect to your NAS.']],
   ['Add Windows build and fix Windows-specific issues', ['Features', 'Install Leyline on Windows as well as macOS.']],
