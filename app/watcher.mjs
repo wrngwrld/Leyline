@@ -7,6 +7,31 @@ import { realpath } from 'node:fs/promises';
 // Files that never matter for syncing (same spirit as the engine's exclude list).
 const NOISE = /(^|[\\/])(\.DS_Store|Thumbs\.db|desktop\.ini|\._[^\\/]*)$|\.(bak|old|tmp)$/i;
 
+/**
+ * Which paths a sync wrote itself, from its results: files that came in from the NAS (rclone
+ * writes them via a temporary "<name>.<id>.partial" file) and the folders whose times it set.
+ * Without a complete file list (a full comparison), everything in that folder counts as its own.
+ * @returns {(name:string, rel:string)=>boolean}
+ */
+export function ownWrites(results) {
+  const own = new Map();
+  for (const x of results) {
+    if (!x.changesKnown || x.changeCount > (x.changes?.length || 0)) { own.set(x.item, 'all'); continue; }
+    const set = new Set(['']);
+    for (const c of x.changes || []) {
+      if (c.dir === 'in') set.add(c.path);
+      const parts = c.path.split('/');
+      for (let i = 1; i < parts.length; i++) set.add(parts.slice(0, i).join('/'));
+    }
+    own.set(x.item, set);
+  }
+  return (name, rel) => {
+    const o = own.get(name);
+    if (o === 'all') return true;
+    return !!o && o.has(rel.replace(/\.[0-9a-z]+\.partial$/i, ''));
+  };
+}
+
 export class FolderWatcher {
   /**
    * @param {object} opts
@@ -20,20 +45,23 @@ export class FolderWatcher {
     this.watchers = [];
     this.timers = new Map();   // flavor -> settle timer
     this.firstAt = new Map();  // flavor -> time of first change in the current burst
+    this.held = new Map();     // flavor -> {count, events: [{name, rel}]} while Leyline itself syncs it
   }
 
-  /** (Re)start watching. @param {{flavor:string, local:string}[]} items */
+  /** (Re)start watching. @param {{flavor:string, local:string, name?:string}[]} items */
   async start(items) {
     this.stop();
-    for (const it of items) await this.add(it.flavor, it.local);
+    for (const it of items) await this.add(it.flavor, it.local, it.name);
   }
 
-  async add(flavor, local) {
+  async add(flavor, local, name = flavor) {
     let dir;
     try { dir = await realpath(local); } catch { return; } // folder doesn't exist (yet)
     try {
       const w = watch(dir, { recursive: true, persistent: false }, (_type, file) => {
         if (file && NOISE.test(String(file))) return;
+        const held = this.held.get(flavor);
+        if (held) { held.events.push({ name, rel: String(file || '').replace(/\\/g, '/') }); return; }
         this.touch(flavor);
       });
       const entry = { flavor, local, w };
@@ -41,7 +69,7 @@ export class FolderWatcher {
         // e.g. the folder was deleted and recreated: drop this watcher and try again shortly
         w.close();
         this.watchers = this.watchers.filter((x) => x !== entry);
-        setTimeout(() => { if (this.active) this.add(flavor, local); }, 10_000);
+        setTimeout(() => { if (this.active) this.add(flavor, local, name); }, 10_000);
       });
       this.watchers.push(entry);
       this.active = true;
@@ -77,4 +105,34 @@ export class FolderWatcher {
   }
 
   pending() { return [...this.timers.keys()]; }
+
+  /**
+   * Leyline is about to sync these versions: collect changes instead of reacting to them,
+   * because most will be Leyline's own writes. Changes seen before now are covered by the sync.
+   */
+  hold(flavors) {
+    for (const f of flavors) {
+      const h = this.held.get(f) || { count: 0, events: [] };
+      h.count++;
+      this.held.set(f, h);
+      clearTimeout(this.timers.get(f));
+      this.timers.delete(f);
+      this.firstAt.delete(f);
+    }
+    this.onPending(this.pending());
+  }
+
+  /**
+   * The sync is done. Changes that are not Leyline's own writes count as real ones.
+   * @param {string[]} flavors
+   * @param {(name:string, rel:string)=>boolean} isOwn  true for a path the sync itself wrote
+   */
+  release(flavors, isOwn) {
+    for (const f of flavors) {
+      const h = this.held.get(f);
+      if (!h || --h.count > 0) continue;
+      this.held.delete(f);
+      if (h.events.some((e) => !isOwn(e.name, e.rel))) this.touch(f);
+    }
+  }
 }

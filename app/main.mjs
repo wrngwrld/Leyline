@@ -8,7 +8,7 @@ import { detectFlavors, flavorName, buildItems, findWowRoot, listAddons } from '
 import * as store from './settings.mjs';
 import { rclonePath, obscure, remoteEnv, remoteRoot, testConnection } from './nas.mjs';
 import { runningFlavors } from './wow.mjs';
-import { FolderWatcher } from './watcher.mjs';
+import { FolderWatcher, ownWrites } from './watcher.mjs';
 import { update, initUpdater, checkForUpdates, installUpdate } from './updater.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -290,7 +290,12 @@ async function startSync(trigger = 'manual', { onlyFlavors, force = false } = {}
         }
       },
     });
-    const r = await engine.syncAll();
+    // the folder watcher would otherwise see this sync's own writes as new changes
+    const syncing = flavors.map((f) => f.id);
+    watcher.hold(syncing);
+    let r;
+    try { r = await engine.syncAll(); } catch (err) { watcher.release(syncing, () => false); throw err; }
+    releaseWatcher(syncing, r.results);
     const summary = {
       time: started.toISOString(),
       run: r.runStamp,
@@ -466,6 +471,12 @@ async function restore({ run, item, paths }) {
 
 // ---- folder watcher -------------------------------------------------------
 
+/** Hand the watcher back what it saw during a sync, minus the sync's own writes. */
+function releaseWatcher(flavors, results) {
+  // late file system events still arrive for a moment after the sync
+  setTimeout(() => watcher.release(flavors, ownWrites(results)), 2500);
+}
+
 const watcher = new FolderWatcher({
   quietMs: 30_000,
   onSettled: (flavor) => { if (settings.autoSync) startSync('files-changed', { onlyFlavors: [flavor] }); },
@@ -475,7 +486,7 @@ const watcher = new FolderWatcher({
 function restartWatcher() {
   if (!settings.autoSync || !isConfigured()) { watcher.stop(); return; }
   const flavors = settings.flavors.filter((f) => f.enabled);
-  watcher.start(buildItems(settings.wowRoot, flavors).map((i) => ({ flavor: i.flavor, local: i.local })));
+  watcher.start(buildItems(settings.wowRoot, flavors).map((i) => ({ flavor: i.flavor, local: i.local, name: i.name })));
 }
 
 // Background sync on a timer, plus right after a game version closes.

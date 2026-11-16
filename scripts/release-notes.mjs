@@ -25,6 +25,7 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
+  ['Ignore Leyline\'s own writes in the folder watcher', ['Fixes', 'No more "changes detected" and an extra sync right after files arrive from your other computers: Leyline now recognizes the files it wrote itself.']],
   ['Fix Windows title bar, first-sync progress and the Computers page', [
     ['Fixes', 'Windows: the minimise, maximise and close buttons now sit on a matching title bar instead of a mismatched block.'],
     ['Fixes', 'A first sync no longer shows totals that keep growing: it shows what has been copied so far until everything is compared.'],
