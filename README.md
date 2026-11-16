@@ -63,6 +63,23 @@ Download the latest installer from [Releases](../../releases):
   network, choose *Allow*; otherwise it cannot reach your NAS. You can change this later
   in *System Settings → Privacy & Security → Local Network*.
 
+From version 0.1.3 on, Leyline updates itself: new versions download in the background and
+install the next time Leyline restarts. You can also restart right away from the sidebar or
+the menu bar / tray icon. Never during a sync.
+
+## Reporting issues
+
+Found a bug or have an idea? [Open an issue](../../issues/new/choose). Please include your
+Leyline version (shown under *Settings*) and your operating system, and leave out passwords
+and NAS addresses. Security problems go to
+[private vulnerability reporting](../../security/advisories/new) instead of a public issue.
+
+## Contributing
+
+Pull requests are welcome. For anything bigger than a small fix, please open an issue first
+so we can agree on the approach. Keep changes focused, test them with `npm start` (see
+below) and describe what you changed and why in the pull request.
+
 ## Development
 
 Requires Node.js 22 or newer.

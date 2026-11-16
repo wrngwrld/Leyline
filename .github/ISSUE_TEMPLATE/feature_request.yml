@@ -1,0 +1,16 @@
+name: Feature request
+description: Suggest an idea or an improvement for Leyline.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would you like Leyline to do?
+      description: Describe the situation and what is missing or annoying today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How could it work?
+      description: Optional. Any idea of how it should look or behave.
