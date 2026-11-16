@@ -247,13 +247,23 @@ async function nasPassword() {
 const queued = new Set();
 let queuedTrigger = null;
 
+// Only one sync at a time. The flag is set before the first await: two triggers in the same
+// moment (the folder watcher for two versions, say) would otherwise both get past the check
+// and run side by side, and the first to finish would pull the engine from under the other.
+let syncRunning = false;
+
 async function startSync(trigger = 'manual', { onlyFlavors, force = false } = {}) {
   if (!isConfigured()) return;
-  if (state.status === 'syncing') {
+  if (syncRunning || state.status === 'syncing') {
     for (const f of onlyFlavors || settings.flavors.filter((x) => x.enabled).map((x) => x.id)) queued.add(f);
     queuedTrigger = trigger;
     return;
   }
+  syncRunning = true;
+  try { await runSync(trigger, { onlyFlavors, force }); } finally { syncRunning = false; }
+}
+
+async function runSync(trigger, { onlyFlavors, force }) {
   // Never sync a game version while it is running: WoW rewrites its files on logout.
   const playing = await runningFlavors();
   state.running = [...playing];
@@ -497,7 +507,7 @@ async function runDetails(run) {
  * paths: only these files of `item`; without item: everything the sync changed.
  */
 async function restore({ run, item, paths }) {
-  if (state.status === 'syncing') return { ok: false, error: 'Wait until the current sync has finished.' };
+  if (syncRunning || state.status === 'syncing') return { ok: false, error: 'Wait until the current sync has finished.' };
   const data = await store.loadRun(run);
   if (!data) return { ok: false, error: 'The details of this sync are no longer available.' };
   const items = data.items.filter((i) => !item || i.item === item);
