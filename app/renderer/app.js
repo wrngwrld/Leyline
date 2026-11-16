@@ -334,8 +334,15 @@ function restoreBtn(req, label, title) {
 
 /** Button for a group of changes: put back what was replaced or deleted, remove what was added. */
 function undoBtn(run, item, cs, can, what) {
-  const back = cs.filter(can), added = cs.filter((c) => c.action === 'added');
-  if (!back.length && !added.length) return '';
+  const open = cs.filter((c) => !c.done);
+  const back = open.filter(can), added = open.filter((c) => c.action === 'added');
+  if (!back.length && !added.length) {
+    // already undone from here: say so instead of offering it again
+    const done = cs.filter((c) => c.done);
+    if (!done.length) return '';
+    const label = done.every((c) => c.action === 'added') ? 'Removed' : done.some((c) => c.action === 'added') ? 'Undone' : 'Restored';
+    return `<span class="d-done">${svg('check')}${label}</span>`;
+  }
   const label = !back.length ? 'Remove' : !added.length ? 'Restore' : 'Undo';
   const title = !back.length ? `Delete ${what} on all your computers (a copy stays in the backups)`
     : !added.length ? `Put ${what} back to how it was before this sync`
@@ -348,8 +355,11 @@ function runDetailsHtml(run) {
   const d = runCache.get(run);
   if (!d) return `<div class="hdetail"><div class="d-note">No file list for this sync. Leyline records which files changed from version 0.1.4 on.</div></div>`;
   const can = (c) => c.backup && d.backups[c.backup];
+  // mark what was restored or removed from this sync already
+  for (const it of d.items) { const u = new Set(d.undone?.[it.item] || []); for (const c of it.changes || []) c.done = u.has(c.path); }
   const all = d.items.flatMap((i) => i.changes || []);
-  const undoable = all.filter((c) => can(c) || c.action === 'added').length;
+  const undoable = all.filter((c) => !c.done && (can(c) || c.action === 'added')).length;
+  const allDone = all.length > 0 && all.every((c) => c.done);
   const lostBackups = all.some((c) => c.backup && !can(c));
   const groups = d.items.filter((i) => !i.changesKnown || i.changes?.length).map((it) => {
     if (!it.changesKnown) return `<div class="d-item"><div class="d-head">${esc(partLabel(it.item))}</div>
@@ -379,7 +389,8 @@ function runDetailsHtml(run) {
     return `<div class="d-item"><div class="d-head">${esc(partLabel(it.item))}</div>${dirs}${more}</div>`;
   }).join('');
   if (!groups) return `<div class="hdetail"><div class="d-note">This sync did not change any files.</div></div>`;
-  const note = undoable
+  const note = allDone ? 'Everything this sync changed has been undone.'
+    : undoable
     ? 'Restore puts a file back to its version from before this sync, Remove deletes a file this sync added. Leyline then syncs that to your other computers, and keeps a copy of everything it replaces or removes.'
     : lostBackups ? 'The backups of this sync have been cleaned up, so it can no longer be undone.'
     : 'Nothing to undo here.';
@@ -606,10 +617,12 @@ document.addEventListener('click', async (e) => {
       act.disabled = true;
       act.textContent = 'Working…';
       const r = await api.restore(req);
+      runCache.set(req.run, await api.run(req.run)); // now shows what was undone
       render(true, true);
       if (!r.ok) return toast(r.error, true);
       const did = [r.restored && `restored ${plural(r.restored, 'file')}`, r.removed && `removed ${plural(r.removed, 'file')}`].filter(Boolean).join(' and ');
-      return toast(`${did[0].toUpperCase()}${did.slice(1)}${r.missing ? ` (${r.missing} no longer there)` : ''}. Syncing to your other computers now.`);
+      if (!did) return toast('Already undone, nothing left to do.');
+      return toast(`${did[0].toUpperCase()}${did.slice(1)}${r.missing ? ` (${r.missing} no longer in the backups)` : ''}. Syncing to your other computers now.`);
     }
     case 'open-backups': return api.openBackups();
     case 'refresh-computers': comp = null; render(true, true); return loadComputers();

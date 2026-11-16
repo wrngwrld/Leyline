@@ -25,6 +25,7 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
+  ['Remember undone changes in History', ['Fixes', 'After restoring or removing files in History, the sync now shows them as Restored or Removed instead of offering the same action again, which then failed with an error.']],
   ['Undo added files from History and tidy the sync details', [
     ['Improvements', 'Undo in History now covers files a sync added too: remove a new addon or file on all your computers with one click, and a copy stays in the backups.'],
     ['Improvements', 'Clearer sync details in History, with a note when there is nothing to undo, and a tidier download status for updates.'],

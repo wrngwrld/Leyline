@@ -395,13 +395,18 @@ async function restore({ run, item, paths }) {
   state.status = 'syncing';
   state.progress = { label: 'restoring files', index: 0, total: 0, files: 0 };
   broadcast();
-  let restored = 0, removed = 0, missing = 0;
+  let restored = 0, removed = 0, gone = 0, missing = 0;
   const flavors = new Set();
+  // remembered in the run's details, so History shows these as done instead of offering them again
+  data.undone ||= {};
   try {
     const eng = await nasEngine();
     for (const it of items) {
       const want = paths ? new Set(paths) : null;
-      const picked = (it.changes || []).filter((c) => !want || want.has(c.path));
+      const done = new Set(data.undone[it.item] || []);
+      const asked = (it.changes || []).filter((c) => !want || want.has(c.path));
+      gone += asked.filter((c) => done.has(c.path)).length; // undone earlier already
+      const picked = asked.filter((c) => !done.has(c.path));
       const back = picked.filter((c) => c.backup);
       const added = picked.filter((c) => c.action === 'added').map((c) => c.path);
       if (!back.length && !added.length) continue;
@@ -414,14 +419,20 @@ async function restore({ run, item, paths }) {
           const r = await eng.restoreFiles({ run, machine: data.machine, item: target, files: back });
           restored += r.restored; missing += r.missing.length;
           if (r.restored) flavors.add(fl);
+          const lost = new Set(r.missing);
+          for (const c of back) if (!lost.has(c.path)) done.add(c.path);
         } catch { missing += back.length; }
       }
       if (added.length) {
         const r = await eng.removeFiles({ item: target, paths: added });
-        removed += r.removed; missing += r.missing.length;
+        // an added file that is already gone needs no removing: count it as done
+        removed += r.removed; gone += r.missing.length;
         if (r.removed) flavors.add(fl);
+        for (const p of added) done.add(p);
       }
+      data.undone[it.item] = [...done];
     }
+    await store.saveRun(run, data);
   } catch (err) {
     return { ok: false, error: err.message };
   } finally {
@@ -429,9 +440,9 @@ async function restore({ run, item, paths }) {
     state.progress = null;
     broadcast();
   }
-  if (!restored && !removed) return { ok: false, error: 'Nothing to undo: these files are no longer there or their backups have been cleaned up.' };
-  startSync('restore', { onlyFlavors: [...flavors], force: true });
-  return { ok: true, restored, removed, missing };
+  if (!restored && !removed && !gone) return { ok: false, error: 'Nothing to undo: the backups of these files have been cleaned up.' };
+  if (flavors.size) startSync('restore', { onlyFlavors: [...flavors], force: true });
+  return { ok: true, restored, removed, gone, missing };
 }
 
 // ---- folder watcher -------------------------------------------------------
@@ -547,6 +558,7 @@ function demoRun(run) {
   const files = (dir, backup, list) => list.map(([p, action]) => ({ path: p, action, dir, backup: action === 'added' ? null : backup }));
   return {
     run, machine: settings.machine, time: new Date(Date.now() - 3 * 60000).toISOString(), backups: { local: true, nas: true },
+    undone: { '_forever_/AddOns': ['LFGForever/LFGForever.toc', 'LFGForever/core.lua'] },
     items: [
       { item: '_forever_/Account', changesKnown: true, changeCount: 4, changes: files('out', 'nas', [
         ['ACCOUNT/SavedVariables/WeakAuras.lua', 'updated'], ['ACCOUNT/SavedVariables/Details.lua', 'updated'],
