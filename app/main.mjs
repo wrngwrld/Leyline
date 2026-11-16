@@ -649,7 +649,7 @@ function demoSnapshot(mode) {
   const item = (f, p, t = 0) => ({ item: `${f}/${p}`, ok: true, transfers: t, deletes: 0, ms: 900 });
   const hist = [
     { time: ago(3), run: '2026-11-16T08-00-00', trigger: 'game-closed', ok: true, ms: 6400, transfers: 131, bytes: 3e6, items: [item('_forever_', 'Account', 131), item('_forever_', 'AddOns')] },
-    { time: ago(14), run: '2026-11-16T07-49-00', trigger: 'auto', ok: true, ms: 41200, transfers: 0, bytes: 0, items: [item('_retail_', 'Account'), item('_classic_era_', 'Account')] },
+    { time: ago(14), run: '2026-11-16T07-49-00', trigger: 'manual', ok: true, ms: 72000, transfers: 11630, bytes: 9e8, items: [item('_retail_', 'Account'), item('_classic_era_', 'AddOns', 11630)] },
     { time: ago(70), trigger: 'auto', ok: false, ms: 20100, transfers: 0, bytes: 0, items: [{ item: '_retail_/AddOns', ok: false, error: 'Could not reach the NAS. Check the address and that you are on the same network.' }] },
     { time: ago(190), trigger: 'manual', ok: true, ms: 312000, transfers: 4218, bytes: 9e8, items: [item('_forever_', 'AddOns', 4218)] },
     { time: ago(1500), trigger: 'startup', ok: true, cancelled: true, ms: 8000, transfers: 12, bytes: 0, items: [item('_retail_', 'Account', 12)] },
@@ -680,6 +680,10 @@ function demoComputers() {
 }
 
 function demoRun(run) {
+  // a first sync that only added files: compared in one go, nothing in its backups
+  if (run === '2026-11-16T07-49-00') return { run, machine: settings.machine, time: new Date().toISOString(), backups: { local: true, nas: true },
+    items: [{ item: '_retail_/Account', changesKnown: true, fromBackups: true, changeCount: 0, changes: [] },
+      { item: '_classic_era_/AddOns', changesKnown: true, fromBackups: true, changeCount: 0, changes: [] }] };
   const files = (dir, backup, list) => list.map(([p, action]) => ({ path: p, action, dir, backup: action === 'added' ? null : backup, conflict: p.endsWith('Details.lua') }));
   return {
     run, machine: settings.machine, time: new Date(Date.now() - 3 * 60000).toISOString(), backups: { local: true, nas: true },
@@ -709,7 +713,7 @@ async function captureScreens(dir) {
     await win.webContents.executeJavaScript(`document.querySelector('[data-page="${p}"]').click()`);
     await wait(700);
     // History: open the newest sync's details too
-    if (p === 'history') { await win.webContents.executeJavaScript(`document.querySelector('.hrow[data-run]')?.click()`); await wait(500); }
+    if (p === 'history') { await win.webContents.executeJavaScript(`document.querySelectorAll('.hrow[data-run]')[${Number(process.env.LEYLINE_SCREENSHOT_RUN || 0)}]?.click()`); await wait(500); }
     if (p === 'versions') { await win.webContents.executeJavaScript(`document.querySelector('.v-link')?.click()`); await wait(500); }
     const img = await win.webContents.capturePage();
     await writeFile(path.join(dir, `${process.env.LEYLINE_SCREENSHOT_PREFIX || ''}${p}.png`), img.toPNG());

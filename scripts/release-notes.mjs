@@ -25,6 +25,7 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
+  ['Explain first syncs that only copied new files in History', ['Fixes', 'History no longer says a first sync "did not change any files" when it copied files that were new on one side; it now says how many it copied.']],
   ['Ask how a version starts on a new computer and warn when it is played twice', [
     ['Features', 'When a game version syncs for the first time on a computer and the NAS already has it, Leyline asks: take the NAS state exactly, or merge with this computer. Whatever gets replaced is kept in the backups.'],
     ['Features', 'Leyline warns when another computer is playing the same game version, because whichever closes last would overwrite the other one\'s settings.'],

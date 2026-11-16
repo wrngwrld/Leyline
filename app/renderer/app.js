@@ -411,9 +411,16 @@ function runDetailsHtml(run) {
   const undoable = all.filter((c) => !c.done && (can(c) || c.action === 'added')).length;
   const allDone = all.length > 0 && all.every((c) => c.done);
   const lostBackups = all.some((c) => c.backup && !can(c));
-  const groups = d.items.filter((i) => !i.changesKnown || i.changes?.length).map((it) => {
+  // how many files each part moved, from the History entry (also for syncs without a file list)
+  const summary = data.history.find((h) => h.run === run);
+  const moved = (item) => summary?.items.find((i) => i.item === item)?.transfers || 0;
+  const copiedNote = (n) => `It compared everything in one go and copied ${plural(n, 'file')} that one side did not have yet. New files are not listed one by one.`;
+  const groups = d.items.filter((i) => !i.changesKnown || i.changes?.length || (i.fromBackups && moved(i.item))).map((it) => {
     if (!it.changesKnown) return `<div class="d-item"><div class="d-head">${esc(partLabel(it.item))}</div>
-      <div class="d-note">Compared in one go (first sync or recovery), so there is no list of single files.</div></div>`;
+      <div class="d-note">${moved(it.item) ? copiedNote(moved(it.item)) : 'Compared in one go (first sync or recovery), so there is no list of single files.'}</div></div>`;
+    // a full comparison that only added files: nothing was replaced, so there is nothing to list or restore
+    if (it.fromBackups && !it.changes.length) return `<div class="d-item"><div class="d-head">${esc(partLabel(it.item))}</div>
+      <div class="d-note">${copiedNote(moved(it.item))} Nothing was replaced, so there is nothing to restore.</div></div>`;
     const dirs = [['in', 'Received from your other computers'], ['out', 'Sent to the NAS']].map(([dir, label]) => {
       const list = it.changes.filter((c) => c.dir === dir);
       if (!list.length) return '';
