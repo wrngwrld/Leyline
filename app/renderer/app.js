@@ -371,6 +371,53 @@ function computerRow(m, me) {
       : `<button class="btn ghost sm" data-act="forget-computer" data-id="${esc(m.id)}" title="Take this old computer off the list. Its backups on the NAS stay.">${armed === forgetKey ? 'Click again to remove' : 'Remove'}</button>`}</div>`;
 }
 
+// Which addons differ between computers, per game version. A computer whose Leyline is too old
+// to report its addons is left out; an empty version means the addon has none in its .toc file.
+const vcmp = (a, b) => {
+  const x = String(a).match(/\d+|[a-z]+/gi) || [], y = String(b).match(/\d+|[a-z]+/gi) || [];
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const p = x[i] ?? '0', q = y[i] ?? '0';
+    const n = /^\d+$/.test(p) && /^\d+$/.test(q) ? Number(p) - Number(q) : p.localeCompare(q);
+    if (n) return n;
+  }
+  return 0;
+};
+
+function addonDiffs(list) {
+  const known = list.filter((m) => m.addons);
+  const out = [];
+  for (const flavor of [...new Set(known.flatMap((m) => Object.keys(m.addons)))].sort()) {
+    const cs = known.filter((m) => m.addons[flavor]);
+    if (cs.length < 2) continue;
+    const rows = [];
+    for (const name of [...new Set(cs.flatMap((m) => Object.keys(m.addons[flavor])))].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))) {
+      const have = cs.map((m) => ({ m, a: m.addons[flavor][name] }));
+      const versions = have.filter((h) => h.a?.v).map((h) => h.a.v);
+      const newest = versions.sort(vcmp).at(-1);
+      const differs = have.some((h) => !h.a) || new Set(versions).size > 1;
+      if (differs) rows.push({ name, title: have.find((h) => h.a?.t)?.a.t || name, have, newest });
+    }
+    out.push({ flavor, rows, total: new Set(cs.flatMap((m) => Object.keys(m.addons[flavor]))).size });
+  }
+  return { out, missing: list.filter((m) => !m.addons).length };
+}
+
+function addonOverview(c) {
+  const { out, missing } = addonDiffs(c.list);
+  const note = missing ? `<div class="d-note">${missing} computer${missing === 1 ? '' : 's'} ${missing === 1 ? 'has' : 'have'} not reported addons yet: it needs a newer Leyline and one sync.</div>` : '';
+  if (!out.length) return `<div class="section-title"><h3>Addons</h3></div><div class="card"><div class="d-note pad">Addon versions appear here once two computers have synced the same game version.</div>${note}</div>`;
+  const blocks = out.map(({ flavor, rows, total }) => {
+    const body = rows.length ? rows.map((r) => `<div class="arow"><div class="a-name" title="${esc(r.name)}">${esc(r.title)}</div>
+        <div class="a-vers">${r.have.map(({ m, a }) => {
+          const cls = !a ? 'bad' : a.v && r.newest && vcmp(a.v, r.newest) < 0 ? 'play' : '';
+          return `<span class="pill ${cls}" title="${esc(m.name || 'Computer')}">${esc(m.name || 'Computer')}: ${a ? esc(a.v || 'no version') : 'not installed'}</span>`;
+        }).join('')}</div></div>`).join('')
+      : `<div class="d-note" style="padding:0 4px 6px">All ${total} addons have the same version on every computer.</div>`;
+    return `<div class="card list"><div class="a-head"><b>${esc(flavorName(flavor))}</b><span class="d-note">${rows.length ? `${rows.length} of ${total} addons differ` : ''}</span></div>${body}</div>`;
+  }).join('');
+  return `<div class="section-title"><h3>Addons</h3></div>${blocks}${note}`;
+}
+
 async function loadComputers() {
   comp = await api.computers();
   if (page === 'computers') render(true, true);
@@ -606,6 +653,7 @@ const PAGES = {
       <div class="head"><div class="eyebrow">Library</div><h1 class="title">Your computers</h1>
         <p class="sub">Every computer that syncs with this NAS folder, what it last did and whether someone is playing on it.</p></div>
       <div class="card list">${list}</div>
+      ${c?.ok ? addonOverview(c) : ''}
       <div class="row" style="margin-top:14px"><button class="btn ghost" data-act="refresh-computers">${svg('sync')}Refresh</button>
         ${c?.fetched ? `<span class="d-note">Updated ${esc(rel(c.fetched))}</span>` : ''}</div>`;
   },

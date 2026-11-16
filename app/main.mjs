@@ -4,7 +4,7 @@ import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { SyncEngine } from '../engine/sync.mjs';
-import { detectFlavors, flavorName, buildItems, findWowRoot, listAddons } from '../engine/flavors.mjs';
+import { detectFlavors, flavorName, buildItems, findWowRoot, listAddons, addonVersions } from '../engine/flavors.mjs';
 import * as store from './settings.mjs';
 import { rclonePath, obscure, remoteEnv, remoteRoot, testConnection } from './nas.mjs';
 import { runningFlavors } from './wow.mjs';
@@ -439,12 +439,21 @@ const machineInfo = () => ({
   id: settings.machineId, name: settings.machine, platform: process.platform, version: app.getVersion(),
   lastSync: state.lastSync, seen: new Date().toISOString(), playing: state.running,
   flavors: settings.flavors.filter((f) => f.enabled).map((f) => f.id),
+  addons: addonList,
 });
+
+/** Installed addon versions, read after each sync and sent along with this computer's entry. */
+let addonList = {};
+async function scanAddons() {
+  if (!settings.wowRoot) return;
+  try { addonList = await addonVersions(settings.wowRoot, settings.flavors.filter((f) => f.enabled).map((f) => f.id)); } catch { /* keep the previous list */ }
+}
 
 let computers = { ok: true, list: [], fetched: null, error: null };
 
 /** After each sync: tell the NAS this computer exists, and drop old backups once a day. */
 async function housekeeping(eng) {
+  await scanAddons();
   try { await eng.writeMachine(machineInfo()); } catch { /* the sync itself worked; try again next time */ }
   const days = settings.keepHistoryDays;
   if (!days || (settings.lastPrune && Date.now() - new Date(settings.lastPrune).getTime() < 20 * 3600_000)) return;
@@ -466,7 +475,9 @@ async function loadComputers() {
   if (!nasReady()) return { ok: false, error: 'Connect to your NAS first, under NAS.', list: [], me: settings.machineId };
   try {
     const list = await (await nasEngine()).listMachines();
-    if (!list.some((m) => m.id === settings.machineId)) list.push(machineInfo()); // before its first sync
+    await scanAddons(); // this computer's list is always current, the others are as of their last sync
+    const mine = list.findIndex((m) => m.id === settings.machineId);
+    if (mine < 0) list.push(machineInfo()); else list[mine] = { ...list[mine], addons: addonList }; // before its first sync
     computers = { ok: true, list, fetched: new Date().toISOString(), error: null };
   } catch (err) {
     computers = { ...computers, ok: false, error: err.message };
@@ -728,11 +739,18 @@ function demoComputers() {
   const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
   return {
     ok: true, fetched: ago(0), me: settings.machineId, list: [
-      { id: settings.machineId, name: settings.machine, platform: process.platform, version: app.getVersion(), lastSync: ago(3), seen: ago(3), playing: [], flavors: ['_retail_', '_classic_era_', '_forever_'] },
-      { id: 'demo-pc', name: 'Gaming-PC', platform: 'win32', version: app.getVersion(), lastSync: ago(52), seen: ago(1), playing: ['_retail_'], flavors: ['_retail_', '_forever_'] },
+      { id: settings.machineId, name: settings.machine, platform: process.platform, version: app.getVersion(), lastSync: ago(3), seen: ago(3), playing: [], flavors: ['_retail_', '_classic_era_', '_forever_'], addons: demoAddons(0) },
+      { id: 'demo-pc', name: 'Gaming-PC', platform: 'win32', version: app.getVersion(), lastSync: ago(52), seen: ago(1), playing: ['_retail_'], flavors: ['_retail_', '_forever_'], addons: demoAddons(1) },
       { id: 'demo-laptop', name: 'Old-Laptop', platform: 'win32', version: '0.1.2', lastSync: ago(60 * 24 * 40), seen: ago(60 * 24 * 40), playing: [], flavors: ['_retail_'] },
     ],
   };
+}
+
+function demoAddons(who) {
+  const a = (name, v, t = name) => [name, { v, t }];
+  const retail = [a('BigWigs', '11.2.4'), a('DBM-Core', '11.2.7', 'Deadly Boss Mods'), a('Details', '12.0.1', 'Details! Damage Meter'), a('ElvUI', '13.99', 'ElvUI (Tukui)'), a('Plater', 'v630', 'Plater Nameplates'), a('WeakAuras', '5.19.2')];
+  if (who === 1) { retail[0] = a('BigWigs', '11.2.2'); retail[2] = a('Details', '12.0.0', 'Details! Damage Meter'); retail.splice(4, 1); retail.push(a('Rarity', '1.0.1')); }
+  return { _retail_: Object.fromEntries(retail), _forever_: Object.fromEntries([a('LFGForever', '2.1'), a('Questie', '9.4.0')]) };
 }
 
 function demoRun(run) {

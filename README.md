@@ -57,7 +57,8 @@ computer: its files, its settings (`<Addon>.lua` under `WTF`), or both. That com
 neither sends nor receives them; the others keep syncing, and nothing is deleted.
 
 **Your computers.** The *Computers* page lists every computer that syncs with the same NAS
-folder, which Leyline version it runs, when it last synced and whether someone is playing.
+folder, which Leyline version it runs, when it last synced and whether someone is playing. Below that, it lists the addons whose version differs between
+computers, per game version, so you can see which computer is behind or is missing one.
 
 Your NAS password is encrypted with the system keychain (macOS Keychain, Windows DPAPI).
 

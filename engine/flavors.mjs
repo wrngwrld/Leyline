@@ -119,22 +119,39 @@ export async function listAddons(wowRoot, flavor) {
   for (const e of entries) {
     if (!(e.isDirectory() || (e.isSymbolicLink() && await isDir(path.join(dir, e.name))))) continue;
     if (e.name.startsWith('.')) continue;
-    out.push({ name: e.name, title: await tocTitle(path.join(dir, e.name), e.name) });
+    out.push({ name: e.name, ...await tocInfo(path.join(dir, e.name), e.name) });
   }
   return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 }
 
-async function tocTitle(dir, name) {
+/** Title and version from an addon's .toc file. */
+async function tocInfo(dir, name) {
   let files = [];
-  try { files = (await readdir(dir)).filter((f) => f.toLowerCase().endsWith('.toc')); } catch { return ''; }
+  try { files = (await readdir(dir)).filter((f) => f.toLowerCase().endsWith('.toc')); } catch { return { title: '', version: '' }; }
   // prefer <Name>.toc, then any flavor-specific one (<Name>_Mainline.toc, …)
   files.sort((a, b) => (b.toLowerCase() === `${name.toLowerCase()}.toc`) - (a.toLowerCase() === `${name.toLowerCase()}.toc`));
+  let title = '', version = '';
   for (const f of files) {
-    try {
-      const m = /^##\s*Title:\s*(.+)$/m.exec(await readFile(path.join(dir, f), 'utf8'));
-      // drop WoW color codes and texture tags
-      if (m) return m[1].replace(/\|c[0-9a-f]{8}|\|r|\|T[^|]*\|t|\|A[^|]*\|a/gi, '').trim();
-    } catch {}
+    let text;
+    try { text = await readFile(path.join(dir, f), 'utf8'); } catch { continue; }
+    // drop WoW color codes and texture tags
+    const t = /^##\s*Title:\s*(.+)$/m.exec(text);
+    if (!title && t) title = t[1].replace(/\|c[0-9a-f]{8}|\|r|\|T[^|]*\|t|\|A[^|]*\|a/gi, '').trim();
+    const v = /^##\s*Version:\s*(.+)$/m.exec(text);
+    // "@project-version@" is the placeholder of a copy that was not packaged by an addon site
+    if (!version && v && !v[1].includes('@')) version = v[1].trim();
+    if (title && version) break;
   }
-  return '';
+  return { title, version };
+}
+
+/** Installed addon versions per flavor: { _retail_: { WeakAuras: '5.19.2', … } }. */
+export async function addonVersions(wowRoot, flavors) {
+  const out = {};
+  for (const f of flavors) {
+    const map = {};
+    for (const a of await listAddons(wowRoot, f)) map[a.name] = { v: a.version, t: a.title };
+    out[f] = map;
+  }
+  return out;
 }

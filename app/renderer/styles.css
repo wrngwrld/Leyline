@@ -400,3 +400,9 @@ select.input { appearance: none; padding-right: 32px; background-image: linear-g
 ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 10px; border: 3px solid transparent; background-clip: padding-box; }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* addon versions across computers */
+.a-head { display: flex; align-items: baseline; justify-content: space-between; padding: 2px 4px 10px; font-size: 13px; }
+.arow { display: grid; grid-template-columns: minmax(120px, 1fr) auto; gap: 14px; align-items: center; padding: 9px 4px; border-top: 1px solid var(--line); font-size: 12.5px; }
+.a-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a-vers { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
