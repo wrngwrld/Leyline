@@ -80,6 +80,22 @@ From version 0.1.3 on, Leyline updates itself: new versions download in the back
 install the next time Leyline restarts. You can also restart right away from the sidebar or
 the menu bar / tray icon. Never during a sync.
 
+## Using an addon manager (CurseForge, WowUp, …)
+
+Addon managers keep their own record of what they installed, per computer and outside the
+WoW folder, so Leyline cannot sync it. When addons arrive from another computer, the manager
+there may still show *Update* or *Modified* for them, even though the files are exactly what
+the other computer has. Two setups avoid that, per game version:
+
+- **Update on one computer only.** Let the manager update addons on one computer; Leyline
+  brings them to the others. Ignore the manager's update badges on the other computers, or
+  don't use it there.
+- **Update on every computer.** Use the manager everywhere and switch off *Addons* for that
+  version under *Game versions*, so Leyline only syncs settings.
+
+If a manager already shows stale badges, *Update* or *Reinstall* in it fixes its record; the
+files it downloads are the same, so Leyline has nothing new to sync beyond that once.
+
 ## Reporting issues
 
 Found a bug or have an idea? [Open an issue](../../issues/new/choose). Please include your
