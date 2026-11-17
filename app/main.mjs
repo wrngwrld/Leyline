@@ -3,6 +3,7 @@ import { app, BrowserWindow, Tray, Menu, ipcMain, dialog, nativeImage, Notificat
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { newEntry, parseLink, isInstalled } from '../engine/wishlist.mjs';
 import { SyncEngine } from '../engine/sync.mjs';
 import { detectFlavors, flavorName, buildItems, findWowRoot, listAddons, addonVersions } from '../engine/flavors.mjs';
 import * as store from './settings.mjs';
@@ -487,6 +488,64 @@ async function loadComputers() {
   return { ...computers, me: settings.machineId };
 }
 
+// ---- the "to try" list ----------------------------------------------------
+
+const STATUSES = ['todo', 'installed', 'dropped'];
+const ID = /^[\w-]{1,40}$/;
+
+/** The list from the NAS, each entry with the computers whose addons look like it. */
+async function loadWishlist(error = null) {
+  if (process.env.LEYLINE_DEMO) return demoWishlist(error);
+  if (!nasReady()) return { ok: false, error: 'Connect to your NAS first, under NAS.', list: [] };
+  try {
+    const [entries, comps] = await Promise.all([(await nasEngine()).listWishlist(), loadComputers()]);
+    return { ok: true, error, list: withMatches(entries, comps.list || []) };
+  } catch (err) {
+    return { ok: false, error: err.message, list: [] };
+  }
+}
+
+function withMatches(entries, machines) {
+  const order = { todo: 0, installed: 1, dropped: 2 };
+  return entries.map((e) => {
+    const p = parseLink(e.url);
+    const entry = { ...e, name: e.name || p?.name || e.url, source: e.source || p?.source || '', status: STATUSES.includes(e.status) ? e.status : 'todo', note: e.note || '' };
+    return { ...entry, installedOn: machines.filter((m) => m.addons && isInstalled(entry, m.addons)).map((m) => m.name || 'Computer') };
+  }).sort((a, b) => order[a.status] - order[b.status] || (b.added || '').localeCompare(a.added || ''));
+}
+
+async function wishlistAdd(url, note) {
+  if (process.env.LEYLINE_DEMO) return loadWishlist();
+  if (!nasReady()) return loadWishlist();
+  const entry = newEntry(url, note, settings.machine);
+  if (!entry) return loadWishlist('That does not look like a link. Paste the address of the addon page.');
+  try {
+    const eng = await nasEngine();
+    if ((await eng.listWishlist()).some((e) => e.id === entry.id)) return loadWishlist(`${entry.name} is already on the list.`);
+    await eng.writeWishlistEntry(entry);
+  } catch (err) { return loadWishlist(err.message); }
+  return loadWishlist();
+}
+
+async function wishlistSet(id, patch) {
+  if (process.env.LEYLINE_DEMO || !ID.test(id || '') || !nasReady()) return loadWishlist();
+  try {
+    const eng = await nasEngine();
+    const entry = (await eng.listWishlist()).find((e) => e.id === id);
+    if (entry) {
+      if (STATUSES.includes(patch?.status)) entry.status = patch.status;
+      if (typeof patch?.note === 'string') entry.note = patch.note.trim().slice(0, 300);
+      await eng.writeWishlistEntry(entry);
+    }
+  } catch (err) { return loadWishlist(err.message); }
+  return loadWishlist();
+}
+
+async function wishlistRemove(id) {
+  if (!process.env.LEYLINE_DEMO && ID.test(id || '') && nasReady()) { try { await (await nasEngine()).deleteWishlistEntry(id); } catch {} }
+  return loadWishlist();
+}
+
 /** Details of one sync, plus whether its backups are still there. */
 async function runDetails(run) {
   if (process.env.LEYLINE_DEMO) return demoRun(run);
@@ -694,6 +753,10 @@ ipcMain.handle('leyline:addons', async (_e, flavor) => {
 ipcMain.handle('leyline:run', (_e, run) => runDetails(run));
 ipcMain.handle('leyline:restore', (_e, req) => restore(req || {}));
 ipcMain.handle('leyline:computers', () => loadComputers());
+ipcMain.handle('leyline:wishlist', () => loadWishlist());
+ipcMain.handle('leyline:wishlistAdd', (_e, url, note) => wishlistAdd(url, note));
+ipcMain.handle('leyline:wishlistSet', (_e, id, patch) => wishlistSet(id, patch));
+ipcMain.handle('leyline:wishlistRemove', (_e, id) => wishlistRemove(id));
 ipcMain.handle('leyline:forgetComputer', async (_e, id) => {
   if (!id || id === settings.machineId || process.env.LEYLINE_DEMO) return loadComputers();
   try { await (await nasEngine()).deleteMachine(id); } catch {}
@@ -746,6 +809,19 @@ function demoComputers() {
       { id: 'demo-laptop', name: 'Old-Laptop', platform: 'win32', version: '0.1.2', lastSync: ago(60 * 24 * 40), seen: ago(60 * 24 * 40), playing: [], flavors: ['_retail_'] },
     ],
   };
+}
+
+function demoWishlist(error) {
+  const ago = (d) => new Date(Date.now() - d * 86400000).toISOString();
+  const me = demoComputers().list;
+  const raw = [
+    ['https://www.curseforge.com/wow/addons/plater-nameplates', 'Heard about it on r/wow: better nameplates for M+', 'todo', 1],
+    ['https://addons.wago.io/addons/rarity', '', 'todo', 2],
+    ['https://www.wowinterface.com/downloads/info24634-Auctionator.html', 'for the AH', 'todo', 4],
+    ['https://github.com/Tercioo/Plater-Nameplates', '', 'dropped', 9],
+    ['https://www.curseforge.com/wow/addons/details', 'damage meter', 'installed', 12],
+  ].map(([url, note, status, d]) => ({ ...newEntry(url, note, 'iPhone', new Date(ago(d))), status }));
+  return { ok: true, error, list: withMatches(raw, me) };
 }
 
 function demoAddons(who) {

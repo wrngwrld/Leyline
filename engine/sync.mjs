@@ -658,6 +658,26 @@ export class SyncEngine {
     return code === 0;
   }
 
+  // ---- the "to try" list -----------------------------------------------------
+
+  wishlistPath(id) { return joinRemote(this.cfg.remoteRoot, 'wishlist', `${id}.json`); }
+
+  async listWishlist() {
+    const { code, out } = await this.raw(['cat', joinRemote(this.cfg.remoteRoot, 'wishlist'), '--include', '*.json']);
+    if (code !== 0) return [];
+    return out.split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((e) => e && e.id && e.url);
+  }
+
+  async writeWishlistEntry(entry) {
+    const { code } = await this.raw(['rcat', this.wishlistPath(entry.id)], JSON.stringify(entry) + '\n');
+    if (code !== 0) throw new Error(`could not save to the NAS (rclone exit ${code})`);
+  }
+
+  async deleteWishlistEntry(id) {
+    const { code } = await this.raw(['deletefile', this.wishlistPath(id)]);
+    return code === 0;
+  }
+
   /** Stop a running sync. bisync's --recover lets the next run continue safely. */
   cancel() {
     this.cancelled = true;

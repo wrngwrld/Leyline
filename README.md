@@ -60,6 +60,12 @@ neither sends nor receives them; the others keep syncing, and nothing is deleted
 folder, which Leyline version it runs, when it last synced and whether someone is playing. Below that, it lists the addons whose version differs between
 computers, per game version, so you can see which computer is behind or is missing one.
 
+**Wishlist.** The *Wishlist* page keeps a list of addons you want to try, stored on the NAS so it's
+the same on every computer. Paste a link (CurseForge, Wago, WoWInterface or GitHub), open the
+page from the list, install the addon with your usual addon manager and mark it installed.
+Leyline shows which computers already have an addon that looks like the entry. It does not
+install addons itself.
+
 Your NAS password is encrypted with the system keychain (macOS Keychain, Windows DPAPI).
 
 **Tip for Unraid and similar:** thousands of small addon files are slow on shares that span

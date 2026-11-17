@@ -406,3 +406,13 @@ select.input { appearance: none; padding-right: 32px; background-image: linear-g
 .arow { display: grid; grid-template-columns: minmax(120px, 1fr) auto; gap: 14px; align-items: center; padding: 9px 4px; border-top: 1px solid var(--line); font-size: 12.5px; }
 .a-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .a-vers { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+
+/* addon wishlist */
+.wl-add { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.wrow { grid-template-columns: 1fr auto; align-items: start; }
+.wrow.done .h-title { color: var(--text-2); }
+.w-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.w-actions a.btn { text-decoration: none; display: inline-flex; align-items: center; }
+.w-have { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+@media (max-width: 760px) { .wl-add { grid-template-columns: 1fr; } .wrow { grid-template-columns: 1fr; } .w-actions { justify-content: flex-start; } }
+.wrow .h-sub { white-space: normal; }

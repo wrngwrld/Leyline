@@ -420,6 +420,33 @@ function addonOverview(c) {
   return `<div class="section-title"><h3>Addons</h3></div>${blocks}${note}`;
 }
 
+// ---- wishlist ---------------------------------------------------------------
+
+let wl = null; // { ok, list, error } from the main process
+const wlDraft = { url: '', note: '' }; // what is typed in the add form survives redraws
+
+async function loadWishlist() {
+  wl = await api.wishlist();
+  if (page === 'wishlist') render(true, true);
+}
+
+function wishRow(e) {
+  const done = e.status !== 'todo';
+  const when = e.added ? `added ${rel(e.added)}${e.by ? ` from ${e.by}` : ''}` : '';
+  const have = e.installedOn.map((n) => `<span class="pill ok">Already on ${esc(n)}</span>`).join('');
+  const btn = (status, label, cls = 'ghost') => `<button class="btn ${cls} sm" data-act="wl-status" data-id="${esc(e.id)}" data-status="${status}">${label}</button>`;
+  const removeKey = JSON.stringify({ wlRemove: e.id });
+  return `<div class="hrow wrow ${done ? 'done' : ''}">
+    <div class="h-main"><div class="h-title">${esc(e.name)} <span class="pill">${esc(e.source)}</span>${e.status === 'installed' ? '<span class="pill ok">Installed</span>' : ''}${e.status === 'dropped' ? '<span class="pill">Dropped</span>' : ''}</div>
+      <div class="h-sub">${esc([e.note, when].filter(Boolean).join(' · '))}</div>
+      ${have && !done ? `<div class="w-have">${have}</div>` : ''}</div>
+    <div class="w-actions">
+      <a class="btn ghost sm" href="${esc(e.url)}" target="_blank" rel="noreferrer">Open page</a>
+      ${done ? btn('todo', 'Back to list') : btn('installed', 'Installed') + btn('dropped', 'Drop')}
+      <button class="btn ghost sm" data-act="wl-remove" data-id="${esc(e.id)}" title="Delete this entry from the list">${armed === removeKey ? 'Click again to delete' : 'Delete'}</button>
+    </div></div>`;
+}
+
 async function loadComputers() {
   comp = await api.computers();
   if (page === 'computers') render(true, true);
@@ -660,6 +687,26 @@ const PAGES = {
         ${c?.fetched ? `<span class="d-note">Updated ${esc(rel(c.fetched))}</span>` : ''}</div>`;
   },
 
+  wishlist() {
+    const w = wl;
+    const todo = w?.list.filter((e) => e.status === 'todo') || [];
+    const done = w?.list.filter((e) => e.status !== 'todo') || [];
+    const body = !w ? `<div class="d-note pad">Asking the NAS…</div>`
+      : !w.ok ? `<div class="banner bad">${svg('x')}<div class="b-body">${esc(w.error || 'Could not read the wishlist from the NAS.')}</div></div>`
+      : `<div class="card list">${todo.length ? todo.map(wishRow).join('') : '<div class="d-note pad">Nothing to try yet. Paste a link above when you find an addon.</div>'}</div>
+        ${done.length ? `<div class="section-title"><h3>Done</h3></div><div class="card list">${done.map(wishRow).join('')}</div>` : ''}`;
+    return `
+      <div class="head"><div class="eyebrow">Library</div><h1 class="title">Addon wishlist</h1>
+        <p class="sub">Addons you want to try, the same list on all your computers. Open the page, install it with your addon manager, then mark it installed.</p></div>
+      <div class="card wl-add">
+        <input class="input" id="wl-url" value="${esc(wlDraft.url)}" placeholder="Paste a link: CurseForge, Wago, WoWInterface or GitHub" autocomplete="off" spellcheck="false">
+        <input class="input" id="wl-note" value="${esc(wlDraft.note)}" placeholder="Note (optional)" autocomplete="off" maxlength="300">
+        <button class="btn" data-act="wl-add">Add</button></div>
+      ${w?.error && w.ok ? `<div class="d-note" style="margin:10px 4px 0">${esc(w.error)}</div>` : ''}
+      <div class="section-title"><h3>To try</h3></div>
+      ${body}`;
+  },
+
   settings() {
     const s = data.settings;
     const opts = [5, 10, 15, 30, 60].map((m) => `<option value="${m}" ${s.syncIntervalMin === m ? 'selected' : ''}>Every ${m} minutes</option>`).join('');
@@ -711,6 +758,7 @@ function go(p) {
   el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
   render(true);
   if (p === 'computers') loadComputers();
+  if (p === 'wishlist') loadWishlist();
 }
 
 /** Two-step buttons: the first click arms, the second (within 4 s) acts. */
@@ -772,6 +820,21 @@ document.addEventListener('click', async (e) => {
     }
     case 'choose-addons': return toggleAddons(act.dataset.id);
     case 'close-addons': openAddons = null; return render(true, true);
+    case 'wl-add': {
+      const url = $('#wl-url')?.value.trim();
+      if (!url) return $('#wl-url')?.focus();
+      act.disabled = true;
+      wl = await api.wishlistAdd(url, $('#wl-note')?.value || '');
+      if (wl.ok && !wl.error) { wlDraft.url = ''; wlDraft.note = ''; } // kept when it was refused, to fix the link
+      render(true, true);
+      return;
+    }
+    case 'wl-status': wl = await api.wishlistSet(act.dataset.id, { status: act.dataset.status }); return render(true, true);
+    case 'wl-remove': {
+      if (!arm(JSON.stringify({ wlRemove: act.dataset.id }))) return;
+      wl = await api.wishlistRemove(act.dataset.id);
+      return render(true, true);
+    }
     case 'refresh-computers': comp = null; render(true, true); return loadComputers();
     case 'forget-computer': {
       if (!arm(JSON.stringify({ forget: act.dataset.id }))) return;
@@ -801,10 +864,16 @@ document.addEventListener('click', async (e) => {
 });
 
 document.addEventListener('input', (e) => {
+  if (e.target.id === 'wl-url') wlDraft.url = e.target.value;
+  if (e.target.id === 'wl-note') wlDraft.note = e.target.value;
   if (e.target.id !== 'addon-search') return;
   addonQuery = e.target.value;
   const q = addonQuery.toLowerCase();
   for (const r of $$('.arow')) r.hidden = !!q && !r.textContent.toLowerCase().includes(q);
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.target.id === 'wl-url' || e.target.id === 'wl-note')) { e.preventDefault(); $('[data-act="wl-add"]')?.click(); }
 });
 
 document.addEventListener('change', async (e) => {
