@@ -5,10 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Wishlist">
-<meta name="theme-color" content="#0c0d18" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#f6f5fb" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
 <title>Leyline wishlist</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M6.4 25 C 19.8 27.5, 12.2 4.5, 25.6 7' fill='none' stroke='%23a78bfa' stroke-width='2' stroke-linecap='round'/%3E%3Ccircle cx='6.4' cy='25' r='3.2' fill='%235eead4'/%3E%3Ccircle cx='25.6' cy='7' r='3.2' fill='%23a78bfa'/%3E%3C/svg%3E">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M6.4 25 C 19.8 27.5, 12.2 4.5, 25.6 7' fill='none' stroke='%23a78bfa' stroke-width='2' stroke-linecap='round'/%3E%3Ccircle cx='6.4' cy='25' r='3.2' fill='%235eead4'/%3E%3Ccircle cx='25.6' cy='7' r='3.2' fill='%23a78bfa'/%3E%3C/svg%3E">
 <style>
   /* the same palette as the Leyline app: night sky with a teal to violet ley line */
   :root {
@@ -37,10 +40,10 @@
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; min-height: 100%; }
+  html { background: var(--bg) radial-gradient(900px 420px at 80% -8%, var(--halo), transparent 70%) no-repeat; }
   body {
-    font: 15px/1.5 var(--font-ui); color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased;
-    background-image: radial-gradient(900px 420px at 80% -8%, var(--halo), transparent 70%);
-    background-repeat: no-repeat;
+    font: 15px/1.5 var(--font-ui); color: var(--text); background: transparent; -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
     padding: max(28px, env(safe-area-inset-top)) 18px max(28px, env(safe-area-inset-bottom));
   }
   main { max-width: 460px; margin: 0 auto; }
