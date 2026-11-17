@@ -61,10 +61,12 @@ folder, which Leyline version it runs, when it last synced and whether someone i
 computers, per game version, so you can see which computer is behind or is missing one.
 
 **Wishlist.** The *Wishlist* page keeps a list of addons you want to try, stored on the NAS so it's
-the same on every computer. Paste a link (CurseForge, Wago, WoWInterface or GitHub), open the
-page from the list, install the addon with your usual addon manager and mark it installed.
-Leyline shows which computers already have an addon that looks like the entry. It does not
-install addons itself.
+the same on every computer. Paste a link (CurseForge, Wago, WoWInterface or GitHub). For a CurseForge addon, *Install*
+hands it to the CurseForge app, which asks which game version to install it for; Leyline reads
+the addon's ID from its CurseForge page for this, so no API key is needed. For other sources,
+open the page and install it with your usual addon manager. Then mark it installed. Leyline
+shows which computers already have an addon that looks like the entry, and does not install
+addons itself.
 
 Your NAS password is encrypted with the system keychain (macOS Keychain, Windows DPAPI).
 

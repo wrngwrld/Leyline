@@ -541,6 +541,52 @@ async function wishlistSet(id, patch) {
   return loadWishlist();
 }
 
+/**
+ * The number CurseForge uses for an addon (its "Project ID"), read from the addon page like a
+ * browser does: the page shows it in its Details box. Needs no API key. Null when the page
+ * could not be read, for instance behind a bot check.
+ */
+async function curseForgeProjectId(pageUrl) {
+  if (parseLink(pageUrl)?.source !== 'CurseForge') return null;
+  const win = new BrowserWindow({ show: false, width: 1200, height: 900, webPreferences: { sandbox: true, contextIsolation: true, partition: 'leyline-lookup' } });
+  try {
+    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    const loaded = win.loadURL(pageUrl).catch(() => {});
+    await Promise.race([loaded, new Promise((r) => setTimeout(r, 20_000))]);
+    for (let i = 0; i < 20 && !win.isDestroyed(); i++) { // the details box is drawn a moment after the page loads
+      const found = await win.webContents.executeJavaScript(`/Project ID:?\\s*(\\d{3,9})/i.exec(document.body?.innerText || '')?.[1] || ''`).catch(() => '');
+      if (found) return found;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    return null;
+  } finally {
+    if (!win.isDestroyed()) win.destroy();
+  }
+}
+
+/** Install button: hand the addon to the CurseForge app, which asks for the game version. */
+async function wishlistInstall(id) {
+  if (!ID.test(id || '')) return loadWishlist();
+  if (process.env.LEYLINE_DEMO) return { ...(await loadWishlist()), opened: 'install' };
+  if (!nasReady()) return loadWishlist();
+  try {
+    const eng = await nasEngine();
+    const entry = (await eng.listWishlist()).find((e) => e.id === id);
+    if (!entry) return loadWishlist();
+    let pid = /^\d{3,9}$/.test(String(entry.projectId || '')) ? String(entry.projectId) : null;
+    if (!pid) {
+      pid = await curseForgeProjectId(entry.url);
+      if (pid) { entry.projectId = Number(pid); await eng.writeWishlistEntry(entry); } // remembered for next time
+    }
+    if (!pid) {
+      shell.openExternal(entry.url); // fall back to the page, whose own Install button does the same
+      return { ...(await loadWishlist()), opened: 'page' };
+    }
+    await shell.openExternal(`curseforge://install?addonId=${pid}`);
+    return { ...(await loadWishlist()), opened: 'install' };
+  } catch (err) { return loadWishlist(err.message); }
+}
+
 async function wishlistRemove(id) {
   if (!process.env.LEYLINE_DEMO && ID.test(id || '') && nasReady()) { try { await (await nasEngine()).deleteWishlistEntry(id); } catch {} }
   return loadWishlist();
@@ -756,6 +802,7 @@ ipcMain.handle('leyline:computers', () => loadComputers());
 ipcMain.handle('leyline:wishlist', () => loadWishlist());
 ipcMain.handle('leyline:wishlistAdd', (_e, url, note) => wishlistAdd(url, note));
 ipcMain.handle('leyline:wishlistSet', (_e, id, patch) => wishlistSet(id, patch));
+ipcMain.handle('leyline:wishlistInstall', (_e, id) => wishlistInstall(id));
 ipcMain.handle('leyline:wishlistRemove', (_e, id) => wishlistRemove(id));
 ipcMain.handle('leyline:forgetComputer', async (_e, id) => {
   if (!id || id === settings.machineId || process.env.LEYLINE_DEMO) return loadComputers();

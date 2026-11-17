@@ -25,6 +25,7 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
+  ['Install wishlist addons through the CurseForge app', ['Features', 'Wishlist: CurseForge addons now have an Install button that hands the addon to the CurseForge app, which asks which game version to install it for.']],
   ['Add an addon wishlist shared between your computers', ['Features', 'The new Wishlist page keeps a list of addons you want to try, the same on all your computers: paste a link from CurseForge, Wago, WoWInterface or GitHub, open the addon page, and mark it installed or dropped. It also shows which of your computers already have an addon that looks like it.']],
   ['Let the overview sparks travel along the lines', ['Improvements', 'The sparks on the Overview graphic now drift along the lines between your computers and the NAS, and speed up while a sync runs.']],
   ['Stop reading addon versions from re-triggering syncs', ['Fixes', 'Fixed an endless loop on Windows in 0.1.17, where Leyline kept syncing and reporting "files changed" even though nothing had changed.']],

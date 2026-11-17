@@ -441,6 +441,7 @@ function wishRow(e) {
       <div class="h-sub">${esc([e.note, when].filter(Boolean).join(' · '))}</div>
       ${have && !done ? `<div class="w-have">${have}</div>` : ''}</div>
     <div class="w-actions">
+      ${e.source === 'CurseForge' && !done ? `<button class="btn sm" data-act="wl-install" data-id="${esc(e.id)}" title="Hand this addon to the CurseForge app, which asks which game version to install it for">Install</button>` : ''}
       <a class="btn ghost sm" href="${esc(e.url)}" target="_blank" rel="noreferrer">Open page</a>
       ${done ? btn('todo', 'Back to list') : btn('installed', 'Installed') + btn('dropped', 'Drop')}
       <button class="btn ghost sm" data-act="wl-remove" data-id="${esc(e.id)}" title="Delete this entry from the list">${armed === removeKey ? 'Click again to delete' : 'Delete'}</button>
@@ -697,7 +698,7 @@ const PAGES = {
         ${done.length ? `<div class="section-title"><h3>Done</h3></div><div class="card list">${done.map(wishRow).join('')}</div>` : ''}`;
     return `
       <div class="head"><div class="eyebrow">Library</div><h1 class="title">Addon wishlist</h1>
-        <p class="sub">Addons you want to try, the same list on all your computers. Open the page, install it with your addon manager, then mark it installed.</p></div>
+        <p class="sub">Addons you want to try, the same list on all your computers. For CurseForge addons, Install hands them to the CurseForge app; for others, open the page and install it with your addon manager. Then mark it installed.</p></div>
       <div class="card wl-add">
         <input class="input" id="wl-url" value="${esc(wlDraft.url)}" placeholder="Paste a link: CurseForge, Wago, WoWInterface or GitHub" autocomplete="off" spellcheck="false">
         <input class="input" id="wl-note" value="${esc(wlDraft.note)}" placeholder="Note (optional)" autocomplete="off" maxlength="300">
@@ -827,6 +828,17 @@ document.addEventListener('click', async (e) => {
       wl = await api.wishlistAdd(url, $('#wl-note')?.value || '');
       if (wl.ok && !wl.error) { wlDraft.url = ''; wlDraft.note = ''; } // kept when it was refused, to fix the link
       render(true, true);
+      return;
+    }
+    case 'wl-install': {
+      act.disabled = true;
+      act.textContent = 'Looking up…';
+      const r = await api.wishlistInstall(act.dataset.id);
+      wl = r;
+      render(true, true);
+      if (r.error) toast(r.error, true);
+      else if (r.opened === 'install') toast('CurseForge opened. Choose the game version to install it for.');
+      else if (r.opened === 'page') toast('Could not read the addon ID, so the page opened instead. Click Install there.');
       return;
     }
     case 'wl-status': wl = await api.wishlistSet(act.dataset.id, { status: act.dataset.status }); return render(true, true);

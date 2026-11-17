@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('leyline', {
   wishlist: () => ipcRenderer.invoke('leyline:wishlist'),
   wishlistAdd: (url, note) => ipcRenderer.invoke('leyline:wishlistAdd', url, note),
   wishlistSet: (id, patch) => ipcRenderer.invoke('leyline:wishlistSet', id, patch),
+  wishlistInstall: (id) => ipcRenderer.invoke('leyline:wishlistInstall', id),
   wishlistRemove: (id) => ipcRenderer.invoke('leyline:wishlistRemove', id),
   forgetComputer: (id) => ipcRenderer.invoke('leyline:forgetComputer', id),
   openBackups: () => ipcRenderer.invoke('leyline:openBackups'),
