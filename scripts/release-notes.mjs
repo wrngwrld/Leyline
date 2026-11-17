@@ -25,6 +25,7 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
+  ['Simplify the wishlist to a plain list', ['Improvements', 'The Wishlist is now a plain list: each addon has one button to install or open it, and Remove when you are done.']],
   ['Add an addon to the wishlist by name', ['Features', 'Wishlist: type an addon name instead of a link. Leyline searches CurseForge and you pick the right result; names sent from your phone wait as Name only until you press Find it.']],
   ['Add addons from your phone with the Leyline inbox', ['Features', 'Add addons to your wishlist from your phone: an optional small server next to your NAS takes links from a phone page or the iOS Share sheet, over Tailscale, and Leyline adds them the next time you open the Wishlist.']],
   ['Install wishlist addons through the CurseForge app', ['Features', 'Wishlist: CurseForge addons now have an Install button that hands the addon to the CurseForge app, which asks which game version to install it for.']],

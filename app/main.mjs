@@ -490,7 +490,6 @@ async function loadComputers() {
 
 // ---- the "to try" list ----------------------------------------------------
 
-const STATUSES = ['todo', 'installed', 'dropped'];
 const ID = /^[\w-]{1,40}$/;
 
 /**
@@ -528,12 +527,11 @@ async function loadWishlist(error = null) {
 }
 
 function withMatches(entries, machines) {
-  const order = { todo: 0, installed: 1, dropped: 2 };
   return entries.map((e) => {
     const p = parseLink(e.url);
-    const entry = { ...e, name: e.name || p?.name || e.url, source: e.source || p?.source || '', status: STATUSES.includes(e.status) ? e.status : 'todo', note: e.note || '' };
+    const entry = { ...e, name: e.name || p?.name || e.url, source: e.source || p?.source || '', note: e.note || '' };
     return { ...entry, installedOn: machines.filter((m) => m.addons && isInstalled(entry, m.addons)).map((m) => m.name || 'Computer') };
-  }).sort((a, b) => order[a.status] - order[b.status] || (b.added || '').localeCompare(a.added || ''));
+  }).sort((a, b) => (b.added || '').localeCompare(a.added || ''));
 }
 
 async function wishlistAdd(url, note, name = '') {
@@ -546,20 +544,6 @@ async function wishlistAdd(url, note, name = '') {
     const eng = await nasEngine();
     if ((await eng.listWishlist()).some((e) => e.id === entry.id)) return loadWishlist(`${entry.name} is already on the list.`);
     await eng.writeWishlistEntry(entry);
-  } catch (err) { return loadWishlist(err.message); }
-  return loadWishlist();
-}
-
-async function wishlistSet(id, patch) {
-  if (process.env.LEYLINE_DEMO || !ID.test(id || '') || !nasReady()) return loadWishlist();
-  try {
-    const eng = await nasEngine();
-    const entry = (await eng.listWishlist()).find((e) => e.id === id);
-    if (entry) {
-      if (STATUSES.includes(patch?.status)) entry.status = patch.status;
-      if (typeof patch?.note === 'string') entry.note = patch.note.trim().slice(0, 300);
-      await eng.writeWishlistEntry(entry);
-    }
   } catch (err) { return loadWishlist(err.message); }
   return loadWishlist();
 }
@@ -876,7 +860,6 @@ ipcMain.handle('leyline:wishlistSearch', async (_e, query) => {
   if (process.env.LEYLINE_DEMO) return { ok: true, query, results: demoSearch(query) };
   try { return { ok: true, query, results: await searchCurseForge(query) }; } catch (err) { return { ok: false, query, results: [], error: err.message }; }
 });
-ipcMain.handle('leyline:wishlistSet', (_e, id, patch) => wishlistSet(id, patch));
 ipcMain.handle('leyline:wishlistInstall', (_e, id) => wishlistInstall(id));
 ipcMain.handle('leyline:wishlistRemove', (_e, id) => wishlistRemove(id));
 ipcMain.handle('leyline:forgetComputer', async (_e, id) => {

@@ -60,14 +60,14 @@ neither sends nor receives them; the others keep syncing, and nothing is deleted
 folder, which Leyline version it runs, when it last synced and whether someone is playing. Below that, it lists the addons whose version differs between
 computers, per game version, so you can see which computer is behind or is missing one.
 
-**Wishlist.** The *Wishlist* page keeps a list of addons you want to try, stored on the NAS so it's
-the same on every computer. Paste a link (CurseForge, Wago, WoWInterface or GitHub), or just type an addon's name:
-Leyline searches CurseForge and you pick the right result. For a CurseForge addon, *Install*
-hands it to the CurseForge app, which asks which game version to install it for; Leyline reads
-the addon's ID from its CurseForge page for this, so no API key is needed. For other sources,
-open the page and install it with your usual addon manager. Then mark it installed. Leyline
-shows which computers already have an addon that looks like the entry, and does not install
-addons itself.
+**Wishlist.** The *Wishlist* page is a plain list of addons you want to try, stored on the NAS so it's
+the same on every computer. Add a link (CurseForge, Wago, WoWInterface or GitHub) or just an
+addon's name; for a name, Leyline searches CurseForge and you pick the right result. For a
+CurseForge addon, *Install* hands it to the CurseForge app, which asks which game version to
+install it for (Leyline reads the addon's ID from its CurseForge page, so no API key is needed).
+For other sources, *Open page* and install it with your usual addon manager. *Remove* takes an
+entry off the list. Leyline shows which computers already have an addon that looks like the
+entry, and does not install addons itself.
 
 Your NAS password is encrypted with the system keychain (macOS Keychain, Windows DPAPI).
 

@@ -20,7 +20,6 @@ contextBridge.exposeInMainWorld('leyline', {
   wishlistAddName: (query, note) => ipcRenderer.invoke('leyline:wishlistAddName', query, note),
   wishlistPick: (forId, result) => ipcRenderer.invoke('leyline:wishlistPick', forId, result),
   wishlistSearch: (query) => ipcRenderer.invoke('leyline:wishlistSearch', query),
-  wishlistSet: (id, patch) => ipcRenderer.invoke('leyline:wishlistSet', id, patch),
   wishlistInstall: (id) => ipcRenderer.invoke('leyline:wishlistInstall', id),
   wishlistRemove: (id) => ipcRenderer.invoke('leyline:wishlistRemove', id),
   forgetComputer: (id) => ipcRenderer.invoke('leyline:forgetComputer', id),
