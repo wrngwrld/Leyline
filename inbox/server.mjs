@@ -49,11 +49,17 @@ function limited(ip) {
   return hits.length > 30;
 }
 
-async function save(link, note) {
+// a name someone typed instead of a link, for the app to search for later
+function cleanName(text) {
+  const t = String(text || '').replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+  return t.length >= 2 && /[\p{L}\p{N}]/u.test(t) ? t : null;
+}
+
+async function save(item, note) {
   await mkdir(DIR, { recursive: true });
   const name = `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomBytes(3).toString('hex')}.json`;
   const tmp = path.join(DIR, `.${name}.tmp`); // Leyline only reads finished *.json files
-  await writeFile(tmp, JSON.stringify({ url: link, note: String(note || '').trim().slice(0, 300), by: 'phone', added: new Date().toISOString() }) + '\n');
+  await writeFile(tmp, JSON.stringify({ ...item, note: String(note || '').trim().slice(0, 300), by: 'phone', added: new Date().toISOString() }) + '\n');
   await rename(tmp, path.join(DIR, name));
   await chmod(path.join(DIR, name), 0o666).catch(() => {}); // any user of the share may read and delete it
 }
@@ -88,13 +94,15 @@ createServer(async (req, res) => {
       const raw = await readBody(req);
       let url0 = raw, note = '';
       const type = String(req.headers['content-type'] || '');
-      if (type.includes('json')) { const j = JSON.parse(raw || '{}'); url0 = j.url; note = j.note; }
+      if (type.includes('json')) { const j = JSON.parse(raw || '{}'); url0 = j.url ?? j.name ?? j.query; note = j.note; }
       else if (type.includes('x-www-form-urlencoded')) { const f = new URLSearchParams(raw); url0 = f.get('url') ?? raw; // a bare link sent as a form is the link itself
       note = f.get('note'); }
       const link = cleanLink(url0);
-      if (!link) return send(res, 400, { error: 'That does not look like a link.' });
-      await save(link, note);
-      return send(res, 200, { ok: true });
+      if (link) { await save({ url: link }, note); return send(res, 200, { ok: true }); }
+      const name = cleanName(url0); // not a link: an addon name, found by the app later
+      if (!name) return send(res, 400, { error: 'Type an addon name or paste a link.' });
+      await save({ query: name }, note);
+      return send(res, 200, { ok: true, name });
     }
     send(res, 404, { error: 'Not found.' });
   } catch (err) {

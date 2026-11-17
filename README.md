@@ -61,7 +61,8 @@ folder, which Leyline version it runs, when it last synced and whether someone i
 computers, per game version, so you can see which computer is behind or is missing one.
 
 **Wishlist.** The *Wishlist* page keeps a list of addons you want to try, stored on the NAS so it's
-the same on every computer. Paste a link (CurseForge, Wago, WoWInterface or GitHub). For a CurseForge addon, *Install*
+the same on every computer. Paste a link (CurseForge, Wago, WoWInterface or GitHub), or just type an addon's name:
+Leyline searches CurseForge and you pick the right result. For a CurseForge addon, *Install*
 hands it to the CurseForge app, which asks which game version to install it for; Leyline reads
 the addon's ID from its CurseForge page for this, so no API key is needed. For other sources,
 open the page and install it with your usual addon manager. Then mark it installed. Leyline
@@ -132,7 +133,7 @@ Replace `SHARE/LEYLINE-FOLDER` with your NAS share and the folder name you set i
 `--user 99:100` makes the files belong to Unraid's usual `nobody:users`.
 
 **2. Open it from your phone.** With Tailscale on, go to `http://YOUR-SERVER:8787/` (the
-server's Tailscale name), enter the token once and paste a link. *Share → Add to Home Screen*
+server's Tailscale name), enter the token once and paste a link or type an addon name. A name is saved as "name only" and you pick the right result in the app with *Find it*. *Share → Add to Home Screen*
 in Safari puts it on your home screen like an app.
 
 **3. Optional: a Share sheet shortcut.** In the Shortcuts app create a new shortcut named
@@ -142,7 +143,7 @@ of URL** with:
 - URL: `http://YOUR-SERVER:8787/add`
 - Method: `POST`
 - Headers: `Authorization` = `Bearer choose-a-long-secret`
-- Request Body: `JSON` with a text field `url` set to *Shortcut Input*
+- Request Body: `JSON` with a text field `url` set to *Shortcut Input* (a link or an addon name)
 
 Then Share → *Add to Leyline* from Safari, Reddit or any app that shares a link. You can add a
 **Show Result** action to see the server's answer.

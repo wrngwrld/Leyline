@@ -3,7 +3,7 @@ import { app, BrowserWindow, Tray, Menu, ipcMain, dialog, nativeImage, Notificat
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { newEntry, parseLink, isInstalled } from '../engine/wishlist.mjs';
+import { newEntry, newSearchEntry, cleanQuery, searchUrl, parseLink, isInstalled } from '../engine/wishlist.mjs';
 import { SyncEngine } from '../engine/sync.mjs';
 import { detectFlavors, flavorName, buildItems, findWowRoot, listAddons, addonVersions } from '../engine/flavors.mjs';
 import * as store from './settings.mjs';
@@ -501,7 +501,10 @@ async function importInbox(eng, existing) {
   let added = 0;
   const have = new Set(existing.map((e) => e.id));
   for (const { file, data } of await eng.listInbox()) {
-    const entry = data && typeof data.url === 'string' ? newEntry(data.url, data.note, String(data.by || 'phone').slice(0, 40), new Date(Date.parse(data.added) || Date.now())) : null;
+    const by = String(data?.by || 'phone').slice(0, 40), when = new Date(Date.parse(data?.added) || Date.now());
+    const entry = !data ? null
+      : typeof data.url === 'string' ? newEntry(data.url, data.note, by, when)
+      : typeof data.query === 'string' ? newSearchEntry(data.query, data.note, by, when) : null;
     try {
       if (entry && !have.has(entry.id)) { await eng.writeWishlistEntry(entry); have.add(entry.id); existing.push(entry); added++; }
       await eng.deleteInboxFile(file); // not a link, or already on the list: nothing to keep
@@ -533,11 +536,12 @@ function withMatches(entries, machines) {
   }).sort((a, b) => order[a.status] - order[b.status] || (b.added || '').localeCompare(a.added || ''));
 }
 
-async function wishlistAdd(url, note) {
+async function wishlistAdd(url, note, name = '') {
   if (process.env.LEYLINE_DEMO) return loadWishlist();
   if (!nasReady()) return loadWishlist();
   const entry = newEntry(url, note, settings.machine);
   if (!entry) return loadWishlist('That does not look like a link. Paste the address of the addon page.');
+  if (name) entry.name = String(name).trim().slice(0, 80) || entry.name; // the real name from the search result
   try {
     const eng = await nasEngine();
     if ((await eng.listWishlist()).some((e) => e.id === entry.id)) return loadWishlist(`${entry.name} is already on the list.`);
@@ -561,26 +565,48 @@ async function wishlistSet(id, patch) {
 }
 
 /**
- * The number CurseForge uses for an addon (its "Project ID"), read from the addon page like a
- * browser does: the page shows it in its Details box. Needs no API key. Null when the page
- * could not be read, for instance behind a bot check.
+ * Loads a page in a hidden window, the way a browser does, and runs `script` in it until it
+ * returns something. Needs no API key. Null when the page could not be read, for instance
+ * behind a bot check or a slow connection.
  */
-async function curseForgeProjectId(pageUrl) {
-  if (parseLink(pageUrl)?.source !== 'CurseForge') return null;
+async function readPage(pageUrl, script, tries = 20) {
   const win = new BrowserWindow({ show: false, width: 1200, height: 900, webPreferences: { sandbox: true, contextIsolation: true, partition: 'leyline-lookup' } });
   try {
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     const loaded = win.loadURL(pageUrl).catch(() => {});
     await Promise.race([loaded, new Promise((r) => setTimeout(r, 20_000))]);
-    for (let i = 0; i < 20 && !win.isDestroyed(); i++) { // the details box is drawn a moment after the page loads
-      const found = await win.webContents.executeJavaScript(`/Project ID:?\\s*(\\d{3,9})/i.exec(document.body?.innerText || '')?.[1] || ''`).catch(() => '');
-      if (found) return found;
+    for (let i = 0; i < tries && !win.isDestroyed(); i++) { // the page fills in a moment after it loads
+      const found = await win.webContents.executeJavaScript(script).catch(() => null);
+      if (found && (!Array.isArray(found) || found.length)) return found;
       await new Promise((r) => setTimeout(r, 500));
     }
     return null;
   } finally {
     if (!win.isDestroyed()) win.destroy();
   }
+}
+
+/** The number CurseForge shows as an addon's "Project ID" in its Details box. */
+async function curseForgeProjectId(pageUrl) {
+  if (parseLink(pageUrl)?.source !== 'CurseForge') return null;
+  return readPage(pageUrl, `/Project ID:?\\s*(\\d{3,9})/i.exec(document.body?.innerText || '')?.[1] || ''`);
+}
+
+/** CurseForge's search page for a name: [{ name, author, summary, downloads, url }]. */
+async function searchCurseForge(query) {
+  const q = cleanQuery(query);
+  if (q.length < 2) return [];
+  const rows = await readPage(searchUrl(q), `[...document.querySelectorAll('.project-card')].slice(0, 10).map((card) => {
+    const href = card.querySelector('a.overlay-link, a[href^="/wow/addons/"]')?.getAttribute('href') || '';
+    const lines = (card.innerText || '').split('\\n').map((l) => l.trim()).filter(Boolean);
+    const by = lines.indexOf('By');
+    const install = lines.indexOf('Install');
+    return { href, name: lines[0] || '', author: by >= 0 ? lines[by + 1] || '' : '', summary: install >= 0 ? lines[install + 1] || '' : '', downloads: lines.find((l) => /^[\\d.,]+[KMB]?$/.test(l)) || '' };
+  })`, 24);
+  return (rows || []).map((r) => {
+    const m = /^\/wow\/addons\/([\w-]+)\/?$/.exec(r.href);
+    return m && r.name ? { name: r.name.slice(0, 80), author: r.author.slice(0, 60), summary: r.summary.slice(0, 160), downloads: r.downloads, url: `https://www.curseforge.com/wow/addons/${m[1]}` } : null;
+  }).filter(Boolean).slice(0, 8);
 }
 
 /** Install button: hand the addon to the CurseForge app, which asks for the game version. */
@@ -604,6 +630,30 @@ async function wishlistInstall(id) {
     await shell.openExternal(`curseforge://install?addonId=${pid}`);
     return { ...(await loadWishlist()), opened: 'install' };
   } catch (err) { return loadWishlist(err.message); }
+}
+
+/** A name to find later (the search needs this computer's browser engine, so it is done here). */
+async function wishlistAddName(query, note) {
+  if (process.env.LEYLINE_DEMO || !nasReady()) return loadWishlist();
+  const entry = newSearchEntry(query, note, settings.machine);
+  if (!entry) return loadWishlist('Type at least two letters of the addon name.');
+  try {
+    const eng = await nasEngine();
+    if (!(await eng.listWishlist()).some((e) => e.id === entry.id)) await eng.writeWishlistEntry(entry);
+  } catch (err) { return loadWishlist(err.message); }
+  return loadWishlist();
+}
+
+/** A search result was chosen: it becomes the real entry, replacing the name it was found for. */
+async function wishlistPick(forId, result) {
+  if (!result || parseLink(result.url)?.source !== 'CurseForge') return loadWishlist();
+  let note = '';
+  if (!process.env.LEYLINE_DEMO && nasReady() && ID.test(forId || '')) {
+    try { note = (await (await nasEngine()).listWishlist()).find((e) => e.id === forId)?.note || ''; } catch {}
+  }
+  const added = await wishlistAdd(result.url, note, result.name);
+  if (!added.error && ID.test(forId || '')) return wishlistRemove(forId);
+  return added;
 }
 
 async function wishlistRemove(id) {
@@ -820,6 +870,12 @@ ipcMain.handle('leyline:restore', (_e, req) => restore(req || {}));
 ipcMain.handle('leyline:computers', () => loadComputers());
 ipcMain.handle('leyline:wishlist', () => loadWishlist());
 ipcMain.handle('leyline:wishlistAdd', (_e, url, note) => wishlistAdd(url, note));
+ipcMain.handle('leyline:wishlistAddName', (_e, query, note) => wishlistAddName(query, note));
+ipcMain.handle('leyline:wishlistPick', (_e, forId, result) => wishlistPick(forId, result));
+ipcMain.handle('leyline:wishlistSearch', async (_e, query) => {
+  if (process.env.LEYLINE_DEMO) return { ok: true, query, results: demoSearch(query) };
+  try { return { ok: true, query, results: await searchCurseForge(query) }; } catch (err) { return { ok: false, query, results: [], error: err.message }; }
+});
 ipcMain.handle('leyline:wishlistSet', (_e, id, patch) => wishlistSet(id, patch));
 ipcMain.handle('leyline:wishlistInstall', (_e, id) => wishlistInstall(id));
 ipcMain.handle('leyline:wishlistRemove', (_e, id) => wishlistRemove(id));
@@ -888,6 +944,11 @@ function demoWishlist(error) {
     ['https://www.curseforge.com/wow/addons/details', 'damage meter', 'installed', 12],
   ].map(([url, note, status, d]) => ({ ...newEntry(url, note, 'iPhone', new Date(ago(d))), status }));
   return { ok: true, error, list: withMatches(raw, me) };
+}
+
+function demoSearch(query) {
+  return [['Plater Nameplates', 'Terciob', '105.6M', 'Highly customizable nameplate with support to scripts and animations.', 'plater-nameplates'], ['Better Name Plates (BetterNamePlates)', 'MrGank', '32.7K', 'Super lightweight opinionated Nameplates addon', 'better-name-plates-betternameplates'], ['VoidPlates', 'Someone', '1.2M', 'Clean threat colored plates', 'voidplates']]
+    .map(([name, author, downloads, summary, slug]) => ({ name, author, downloads, summary, url: `https://www.curseforge.com/wow/addons/${slug}` }));
 }
 
 function demoAddons(who) {

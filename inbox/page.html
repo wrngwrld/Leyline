@@ -87,10 +87,10 @@
   </div>
   <div class="eyebrow">Wishlist</div>
   <h1>Add an addon</h1>
-  <p class="sub">Paste a link from CurseForge, Wago, WoWInterface or GitHub. It shows up in the Leyline app on your computers.</p>
+  <p class="sub">Paste a link from CurseForge, Wago, WoWInterface or GitHub, or just type the addon's name. It shows up in the Leyline app on your computers.</p>
   <form id="f" class="card" autocomplete="off">
-    <div class="field"><label for="url">Addon link</label>
-      <input id="url" type="url" inputmode="url" placeholder="https://www.curseforge.com/wow/addons/…" required autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+    <div class="field"><label for="url">Addon link or name</label>
+      <input id="url" type="text" inputmode="url" placeholder="A link, or a name like Plater" required autocapitalize="off" autocorrect="off" spellcheck="false"></div>
     <div class="field"><label for="note">Note <span style="font-weight:400">(optional)</span></label>
       <input id="note" placeholder="Why you want to try it" maxlength="300"></div>
     <div class="field" id="tokenField" hidden><label for="token">Token</label>
@@ -120,7 +120,7 @@
     try {
       const r = await fetch('add', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token }, body: JSON.stringify({ url: $('url').value, note: $('note').value }) });
       const j = await r.json().catch(() => ({}));
-      if (r.ok) { store.set(token); $('tokenField').hidden = true; say('ok', 'Added. It will show up in Leyline.'); $('url').value = ''; $('note').value = ''; }
+      if (r.ok) { store.set(token); $('tokenField').hidden = true; say('ok', j.name ? 'Saved "' + j.name + '". Pick the right addon in Leyline.' : 'Added. It will show up in Leyline.'); $('url').value = ''; $('note').value = ''; }
       else { if (r.status === 401) { $('tokenField').hidden = false; $('token').focus(); } say('bad', j.error || 'Failed (' + r.status + ').'); }
     } catch { say('bad', 'Could not reach the server. Is Tailscale on?'); }
     $('go').disabled = false;

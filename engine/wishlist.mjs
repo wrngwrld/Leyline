@@ -44,6 +44,19 @@ export function newEntry(input, note = '', by = '', now = new Date()) {
   return { id: entryId(p.url), url: p.url, source: p.source, name: p.name, note: String(note || '').trim().slice(0, 300), status: 'todo', added: now.toISOString(), by };
 }
 
+/** The CurseForge search page for a name. */
+export const searchUrl = (query) => `https://www.curseforge.com/wow/search?page=1&pageSize=20&sortBy=popularity&class=addons&search=${encodeURIComponent(query)}`;
+
+/** Text a person typed instead of a link, cleaned up. Empty when there is nothing to search for. */
+export const cleanQuery = (text) => String(text || '').replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+
+/** An addon known only by name: found on the desktop later, with the CurseForge search. */
+export function newSearchEntry(query, note = '', by = '', now = new Date()) {
+  const q = cleanQuery(query);
+  if (q.length < 2 || !/[\p{L}\p{N}]/u.test(q)) return null;
+  return { id: entryId(`search:${q}`), url: searchUrl(q), source: 'Search', name: q, query: q, note: String(note || '').trim().slice(0, 300), status: 'todo', added: now.toISOString(), by };
+}
+
 const simple = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 /**
@@ -52,7 +65,7 @@ const simple = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
  * @param {Record<string, Record<string, {t?:string}>>} addons  { flavor: { folder: {v, t} } }
  */
 export function isInstalled(entry, addons) {
-  const slug = simple(entry.url.split('/').filter(Boolean).at(-1)?.replace(/^info\d+-?/i, '').replace(/\.html$/i, ''));
+  const slug = entry.source === 'Search' ? '' : simple(entry.url.split('/').filter(Boolean).at(-1)?.replace(/^info\d+-?/i, '').replace(/\.html$/i, ''));
   const keys = [...new Set([simple(entry.name), slug].filter((k) => k.length >= 3))];
   for (const folders of Object.values(addons || {})) {
     for (const [folder, a] of Object.entries(folders || {})) {

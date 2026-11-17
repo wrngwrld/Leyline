@@ -25,6 +25,7 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
+  ['Add an addon to the wishlist by name', ['Features', 'Wishlist: type an addon name instead of a link. Leyline searches CurseForge and you pick the right result; names sent from your phone wait as Name only until you press Find it.']],
   ['Add addons from your phone with the Leyline inbox', ['Features', 'Add addons to your wishlist from your phone: an optional small server next to your NAS takes links from a phone page or the iOS Share sheet, over Tailscale, and Leyline adds them the next time you open the Wishlist.']],
   ['Install wishlist addons through the CurseForge app', ['Features', 'Wishlist: CurseForge addons now have an Install button that hands the addon to the CurseForge app, which asks which game version to install it for.']],
   ['Add an addon wishlist shared between your computers', ['Features', 'The new Wishlist page keeps a list of addons you want to try, the same on all your computers: paste a link from CurseForge, Wago, WoWInterface or GitHub, open the addon page, and mark it installed or dropped. It also shows which of your computers already have an addon that looks like it.']],
@@ -84,7 +85,7 @@ const curated = new Map([
   ['Let the Addons switch be set before a version is enabled', ['Fixes', 'Let you choose the Addons setting before enabling a game version.']],
 ]);
 
-const internal = /^(add (readme|mit license|nas speed comparison script|script to download)|revert version number|improve release notes|override vulnerable minimatch|keep build-only|.*\breadme\b|.*\brelease notes?\b)/i;
+const internal = /^(add (readme|mit license|nas speed comparison script|script to download)|revert version number|improve release notes|override vulnerable minimatch|keep build-only|.*\breadme\b|.*\brelease notes?\b|give the phone page)/i;
 const classify = (subject) => {
   if (/\b(password|safe.?storage|encrypt|credential)\b/i.test(subject)) return 'Security & privacy';
   if (/^(fix|let|keep|treat|hide)\b|^update the overview\b/i.test(subject)) return 'Fixes';

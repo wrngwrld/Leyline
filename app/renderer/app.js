@@ -423,11 +423,39 @@ function addonOverview(c) {
 // ---- wishlist ---------------------------------------------------------------
 
 let wl = null; // { ok, list, error } from the main process
+let wlFind = null; // a name being searched: { query, forId, busy, results, error }; forId is the entry it is for
 const wlDraft = { url: '', note: '' }; // what is typed in the add form survives redraws
 
 async function loadWishlist() {
   wl = await api.wishlist();
   if (page === 'wishlist') render(true, true);
+}
+
+const LINK_LIKE = /^\s*(https?:\/\/)?[^\s/]+\.[a-z]{2,}(\/\S*)?\s*$/i; // a web address; anything else is an addon name
+
+async function wishFind(query, forId = null) {
+  wlFind = { query, forId, busy: true, results: [], error: null };
+  render(true, true);
+  const r = await api.wishlistSearch(query);
+  if (!wlFind || wlFind.query !== query) return; // closed or replaced meanwhile
+  wlFind = { ...wlFind, busy: false, results: r.results || [], error: r.ok ? null : r.error };
+  render(true, true);
+}
+
+function findPanel() {
+  const w = wlFind;
+  if (!w) return '';
+  const rows = w.results.map((r, i) => `<div class="wf-row"><div class="wf-main"><div class="h-title">${esc(r.name)}</div>
+      <div class="h-sub">${esc([r.author && `by ${r.author}`, r.downloads && `${r.downloads} downloads`].filter(Boolean).join(' · '))}</div>
+      ${r.summary ? `<div class="wf-sum">${esc(r.summary)}</div>` : ''}</div>
+      <button class="btn sm" data-act="wl-pick" data-i="${i}">${w.forId ? 'This one' : 'Add'}</button></div>`).join('');
+  const body = w.busy ? `<div class="d-note pad">Searching CurseForge…</div>`
+    : w.error ? `<div class="d-note pad">${esc(w.error)}</div>`
+    : rows || `<div class="d-note pad">Nothing found for “${esc(w.query)}”. Try another spelling, or search the site yourself.</div>`;
+  return `<div class="card list wl-find"><div class="a-head"><b>Results for “${esc(w.query)}”</b>
+      <span class="row"><button class="btn ghost sm" data-act="wl-find-close">Close</button></span></div>${body}
+    ${!w.busy ? `<div class="wf-foot">${w.forId ? '' : `<button class="btn ghost sm" data-act="wl-save-name">Save the name for later</button>`}
+      <a class="btn ghost sm" href="${esc(`https://www.curseforge.com/wow/search?class=addons&search=${encodeURIComponent(w.query)}`)}" target="_blank" rel="noreferrer">Open the search</a></div>` : ''}</div>`;
 }
 
 function wishRow(e) {
@@ -437,10 +465,11 @@ function wishRow(e) {
   const btn = (status, label, cls = 'ghost') => `<button class="btn ${cls} sm" data-act="wl-status" data-id="${esc(e.id)}" data-status="${status}">${label}</button>`;
   const removeKey = JSON.stringify({ wlRemove: e.id });
   return `<div class="hrow wrow ${done ? 'done' : ''}">
-    <div class="h-main"><div class="h-title">${esc(e.name)} <span class="pill">${esc(e.source)}</span>${e.status === 'installed' ? '<span class="pill ok">Installed</span>' : ''}${e.status === 'dropped' ? '<span class="pill">Dropped</span>' : ''}</div>
+    <div class="h-main"><div class="h-title">${esc(e.name)} <span class="pill">${e.source === 'Search' ? 'Name only' : esc(e.source)}</span>${e.status === 'installed' ? '<span class="pill ok">Installed</span>' : ''}${e.status === 'dropped' ? '<span class="pill">Dropped</span>' : ''}</div>
       <div class="h-sub">${esc([e.note, when].filter(Boolean).join(' · '))}</div>
       ${have && !done ? `<div class="w-have">${have}</div>` : ''}</div>
     <div class="w-actions">
+      ${e.source === 'Search' && !done ? `<button class="btn sm" data-act="wl-find" data-id="${esc(e.id)}" data-query="${esc(e.query || e.name)}">Find it</button>` : ''}
       ${e.source === 'CurseForge' && !done ? `<button class="btn sm" data-act="wl-install" data-id="${esc(e.id)}" title="Hand this addon to the CurseForge app, which asks which game version to install it for">Install</button>` : ''}
       <a class="btn ghost sm" href="${esc(e.url)}" target="_blank" rel="noreferrer">Open page</a>
       ${done ? btn('todo', 'Back to list') : btn('installed', 'Installed') + btn('dropped', 'Drop')}
@@ -698,12 +727,13 @@ const PAGES = {
         ${done.length ? `<div class="section-title"><h3>Done</h3></div><div class="card list">${done.map(wishRow).join('')}</div>` : ''}`;
     return `
       <div class="head"><div class="eyebrow">Library</div><h1 class="title">Addon wishlist</h1>
-        <p class="sub">Addons you want to try, the same list on all your computers. For CurseForge addons, Install hands them to the CurseForge app; for others, open the page and install it with your addon manager. Then mark it installed.</p></div>
+        <p class="sub">Addons you want to try, the same list on all your computers. Paste a link or just type a name and pick the right result. For CurseForge addons, Install hands them to the CurseForge app; for others, open the page and install it with your addon manager. Then mark it installed.</p></div>
       <div class="card wl-add">
-        <input class="input" id="wl-url" value="${esc(wlDraft.url)}" placeholder="Paste a link: CurseForge, Wago, WoWInterface or GitHub" autocomplete="off" spellcheck="false">
+        <input class="input" id="wl-url" value="${esc(wlDraft.url)}" placeholder="Paste a link, or type an addon name" autocomplete="off" spellcheck="false">
         <input class="input" id="wl-note" value="${esc(wlDraft.note)}" placeholder="Note (optional)" autocomplete="off" maxlength="300">
         <button class="btn" data-act="wl-add">Add</button></div>
       ${w?.error && w.ok ? `<div class="d-note" style="margin:10px 4px 0">${esc(w.error)}</div>` : ''}
+      ${wlFind ? `<div style="margin-top:14px">${findPanel()}</div>` : ''}
       <div class="section-title"><h3>To try</h3></div>
       ${body}`;
   },
@@ -821,9 +851,32 @@ document.addEventListener('click', async (e) => {
     }
     case 'choose-addons': return toggleAddons(act.dataset.id);
     case 'close-addons': openAddons = null; return render(true, true);
+    case 'wl-find': return wishFind(act.dataset.query, act.dataset.id);
+    case 'wl-find-close': wlFind = null; return render(true, true);
+    case 'wl-pick': {
+      const w = wlFind, pick = w?.results[Number(act.dataset.i)];
+      if (!pick) return;
+      act.disabled = true;
+      wl = await api.wishlistPick(w.forId, pick);
+      wlFind = null;
+      if (wl.ok && !wl.error) { wlDraft.url = ''; wlDraft.note = ''; }
+      render(true, true);
+      if (wl.error) toast(wl.error, true);
+      return;
+    }
+    case 'wl-save-name': {
+      const w = wlFind;
+      if (!w) return;
+      act.disabled = true;
+      wl = await api.wishlistAddName(w.query, $('#wl-note')?.value || wlDraft.note);
+      wlFind = null; wlDraft.url = ''; wlDraft.note = '';
+      render(true, true);
+      return;
+    }
     case 'wl-add': {
       const url = $('#wl-url')?.value.trim();
       if (!url) return $('#wl-url')?.focus();
+      if (!LINK_LIKE.test(url)) return wishFind(url); // a name: search for it
       act.disabled = true;
       wl = await api.wishlistAdd(url, $('#wl-note')?.value || '');
       if (wl.ok && !wl.error) { wlDraft.url = ''; wlDraft.note = ''; } // kept when it was refused, to fix the link
