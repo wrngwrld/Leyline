@@ -65,6 +65,13 @@ async function save(item, note) {
 }
 
 const PAGE = readFileSync(new URL('./page.html', import.meta.url), 'utf8');
+const FILES = {
+  '/apple-touch-icon.png': ['apple-touch-icon.png', 'image/png'],
+  '/icon-192.png': ['icon-192.png', 'image/png'],
+  '/icon-512.png': ['icon-512.png', 'image/png'],
+  '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'],
+};
+const ASSETS = Object.fromEntries(Object.entries(FILES).map(([p, [f, t]]) => [p, [readFileSync(new URL(`./${f}`, import.meta.url)), t]]));
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -86,6 +93,7 @@ createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   try {
     if (req.method === 'GET' && url.pathname === '/') return send(res, 200, PAGE, 'text/html');
+    if (req.method === 'GET' && ASSETS[url.pathname]) { const [buf, type] = ASSETS[url.pathname]; res.writeHead(200, { 'content-type': type, 'cache-control': 'public, max-age=86400' }); return res.end(buf); }
     if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true });
     if (req.method === 'POST' && url.pathname === '/add') {
       if (limited(req.socket.remoteAddress || '')) return send(res, 429, { error: 'Too many requests, try again in a minute.' });
