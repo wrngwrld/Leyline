@@ -1,6 +1,6 @@
 FROM node:22-alpine
 WORKDIR /app
-COPY server.mjs .
+COPY server.mjs page.html ./
 ENV PORT=8787 INBOX_DIR=/data
 EXPOSE 8787
 # Unraid: run as nobody:users with --user 99:100 (the template does), so files match the rest of the share

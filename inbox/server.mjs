@@ -6,6 +6,7 @@
 //   PORT           optional  default 8787
 //   INBOX_DIR      optional  default /data (mount <share>/<Leyline folder>/inbox there)
 import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';
 import { mkdir, writeFile, rename, chmod } from 'node:fs/promises';
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import path from 'node:path';
@@ -57,36 +58,7 @@ async function save(link, note) {
   await chmod(path.join(DIR, name), 0o666).catch(() => {}); // any user of the share may read and delete it
 }
 
-const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Leyline wishlist</title>
-<style>
-  body { font: 16px system-ui, sans-serif; margin: 0; padding: 24px 16px; background: #f5f4fa; color: #1c1b2b; }
-  main { max-width: 440px; margin: 0 auto; }
-  h1 { font-size: 22px; margin: 0 0 4px; } p { color: #666; margin: 0 0 18px; font-size: 14px; }
-  input, button { width: 100%; box-sizing: border-box; font: inherit; padding: 12px 14px; margin-bottom: 10px; border-radius: 10px; border: 1px solid #c9c7d8; background: #fff; color: inherit; }
-  button { background: #4b3fd1; border-color: #4b3fd1; color: #fff; font-weight: 600; }
-  #msg { min-height: 1.4em; font-size: 14px; }
-  @media (prefers-color-scheme: dark) { body { background: #17161f; color: #eeeef6; } input { background: #232232; border-color: #3a3950; } p { color: #9a99ad; } }
-</style></head><body><main>
-<h1>Leyline wishlist</h1><p>Paste an addon link. It shows up in the Leyline app on your computers.</p>
-<form id="f"><input id="url" type="url" inputmode="url" placeholder="Addon link" required autocomplete="off">
-<input id="note" placeholder="Note (optional)" autocomplete="off" maxlength="300">
-<input id="token" type="password" placeholder="Token (asked once, then remembered)" autocomplete="off">
-<button>Add to wishlist</button><div id="msg"></div></form>
-<script>
-const $ = (id) => document.getElementById(id);
-try { $('token').value = localStorage.getItem('leylineToken') || ''; } catch {}
-const p = new URLSearchParams(location.search); if (p.get('url')) $('url').value = p.get('url');
-$('f').addEventListener('submit', async (e) => {
-  e.preventDefault(); $('msg').textContent = 'Sending…';
-  try {
-    const r = await fetch('add', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + $('token').value.trim() }, body: JSON.stringify({ url: $('url').value, note: $('note').value }) });
-    const j = await r.json().catch(() => ({}));
-    if (r.ok) { try { localStorage.setItem('leylineToken', $('token').value.trim()); } catch {} $('msg').textContent = 'Added.'; $('url').value = ''; $('note').value = ''; }
-    else $('msg').textContent = j.error || 'Failed (' + r.status + ').';
-  } catch { $('msg').textContent = 'Could not reach the server.'; }
-});
-</script></main></body></html>`;
+const PAGE = readFileSync(new URL('./page.html', import.meta.url), 'utf8');
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
