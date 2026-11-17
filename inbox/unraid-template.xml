@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>leyline-inbox</Name>
+  <Repository>ghcr.io/wrngwrld/leyline-inbox:latest</Repository>
+  <Registry>https://github.com/wrngwrld/Leyline/pkgs/container/leyline-inbox</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/wrngwrld/Leyline/issues</Support>
+  <Project>https://github.com/wrngwrld/Leyline</Project>
+  <Overview>Takes addon links from your phone and puts them in your Leyline wishlist. Part of Leyline, the WoW settings and addon sync. Keep it private: reach it through Tailscale, never forward its port to the internet.</Overview>
+  <Category>Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8787]/</WebUI>
+  <ExtraParams>--user 99:100</ExtraParams>
+  <Config Name="Web port" Target="8787" Default="8787" Mode="tcp" Description="Port the phone talks to" Type="Port" Display="always" Required="true" Mask="false">8787</Config>
+  <Config Name="Token" Target="LEYLINE_TOKEN" Default="" Mode="" Description="A secret of at least 8 characters. The phone sends it with every link." Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="Inbox folder" Target="/data" Default="/mnt/user/leyline/Leyline/inbox" Mode="rw" Description="The 'inbox' folder inside your Leyline NAS folder: /mnt/user/SHARE/FOLDER/inbox" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/leyline/Leyline/inbox</Config>
+</Container>

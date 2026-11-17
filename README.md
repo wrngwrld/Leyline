@@ -105,6 +105,48 @@ the other computer has. Two setups avoid that, per game version:
 If a manager already shows stale badges, *Update* or *Reinstall* in it fixes its record; the
 files it downloads are the same, so Leyline has nothing new to sync beyond that once.
 
+## Adding addons from your phone
+
+Optional. When you read about an addon on the go, the small **inbox** server in
+[`inbox/`](inbox/) lets you send its link to your Leyline wishlist in two taps. It runs next to
+your NAS, saves each link as a small file in an `inbox` folder inside your Leyline NAS folder,
+and the Leyline app moves those links into the wishlist the next time you open it.
+
+Reach it only through a private network such as [Tailscale](https://tailscale.com); never
+forward its port to the internet. It also asks for a secret token with every link.
+
+**1. Run the server** (Unraid, or any machine with Docker that can write to the NAS share):
+
+```bash
+docker run -d --name leyline-inbox --restart unless-stopped \
+  -p 8787:8787 \
+  -e LEYLINE_TOKEN='choose-a-long-secret' \
+  -v /mnt/user/SHARE/LEYLINE-FOLDER/inbox:/data \
+  --user 99:100 \
+  ghcr.io/wrngwrld/leyline-inbox:latest
+```
+
+Replace `SHARE/LEYLINE-FOLDER` with your NAS share and the folder name you set in Leyline
+(*NAS* page). On Unraid you can also add the container from its Docker tab with the values of
+[`inbox/unraid-template.xml`](inbox/unraid-template.xml): the port, the token and the inbox folder.
+`--user 99:100` makes the files belong to Unraid's usual `nobody:users`.
+
+**2. Open it from your phone.** With Tailscale on, go to `http://YOUR-SERVER:8787/` (the
+server's Tailscale name), enter the token once and paste a link. *Share → Add to Home Screen*
+in Safari puts it on your home screen like an app.
+
+**3. Optional: a Share sheet shortcut.** In the Shortcuts app create a new shortcut named
+*Add to Leyline* and turn on *Show in Share Sheet* (accept URLs). Add the action **Get Contents
+of URL** with:
+
+- URL: `http://YOUR-SERVER:8787/add`
+- Method: `POST`
+- Headers: `Authorization` = `Bearer choose-a-long-secret`
+- Request Body: `JSON` with a text field `url` set to *Shortcut Input*
+
+Then Share → *Add to Leyline* from Safari, Reddit or any app that shares a link. You can add a
+**Show Result** action to see the server's answer.
+
 ## Reporting issues
 
 Found a bug or have an idea? [Open an issue](../../issues/new/choose). Please include your

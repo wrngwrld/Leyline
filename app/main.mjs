@@ -493,12 +493,31 @@ async function loadComputers() {
 const STATUSES = ['todo', 'installed', 'dropped'];
 const ID = /^[\w-]{1,40}$/;
 
+/**
+ * Links sent from the phone land in the NAS folder's inbox/. Move them into the wishlist (one
+ * entry per addon) and clear the inbox files. Returns how many new entries there are.
+ */
+async function importInbox(eng, existing) {
+  let added = 0;
+  const have = new Set(existing.map((e) => e.id));
+  for (const { file, data } of await eng.listInbox()) {
+    const entry = data && typeof data.url === 'string' ? newEntry(data.url, data.note, String(data.by || 'phone').slice(0, 40), new Date(Date.parse(data.added) || Date.now())) : null;
+    try {
+      if (entry && !have.has(entry.id)) { await eng.writeWishlistEntry(entry); have.add(entry.id); existing.push(entry); added++; }
+      await eng.deleteInboxFile(file); // not a link, or already on the list: nothing to keep
+    } catch { /* try again on the next load; the entry id keeps it from doubling */ }
+  }
+  return added;
+}
+
 /** The list from the NAS, each entry with the computers whose addons look like it. */
 async function loadWishlist(error = null) {
   if (process.env.LEYLINE_DEMO) return demoWishlist(error);
   if (!nasReady()) return { ok: false, error: 'Connect to your NAS first, under NAS.', list: [] };
   try {
-    const [entries, comps] = await Promise.all([(await nasEngine()).listWishlist(), loadComputers()]);
+    const eng = await nasEngine();
+    const [entries, comps] = await Promise.all([eng.listWishlist(), loadComputers()]);
+    await importInbox(eng, entries);
     return { ok: true, error, list: withMatches(entries, comps.list || []) };
   } catch (err) {
     return { ok: false, error: err.message, list: [] };

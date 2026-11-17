@@ -678,6 +678,30 @@ export class SyncEngine {
     return code === 0;
   }
 
+  // The phone's inbox (see inbox/): links dropped into <NAS folder>/inbox/ by the small server on the NAS.
+
+  /** Finished inbox files, as [{file, data}]. Unreadable ones come back with data null. */
+  async listInbox(limit = 50) {
+    const dir = joinRemote(this.cfg.remoteRoot, 'inbox');
+    const { code, out } = await this.raw(['lsf', dir, '--files-only', '--include', '*.json', '--max-depth', '1']);
+    if (code !== 0) return [];
+    const files = out.split('\n').map((l) => l.trim()).filter((f) => /^[\w.-]+\.json$/.test(f) && !f.startsWith('.')).slice(0, limit);
+    const items = [];
+    for (const file of files) {
+      const { code: c, out: text } = await this.raw(['cat', joinRemote(dir, file), '--count', '8192']);
+      let data = null;
+      if (c === 0) { try { data = JSON.parse(text); } catch { /* junk */ } }
+      items.push({ file, data });
+    }
+    return items;
+  }
+
+  async deleteInboxFile(file) {
+    if (!/^[\w.-]+\.json$/.test(file)) return false;
+    const { code } = await this.raw(['deletefile', joinRemote(this.cfg.remoteRoot, 'inbox', file)]);
+    return code === 0;
+  }
+
   /** Stop a running sync. bisync's --recover lets the next run continue safely. */
   cancel() {
     this.cancelled = true;
