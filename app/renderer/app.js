@@ -285,7 +285,7 @@ function versionTiles() {
 function historyRows(items) {
   return items.map((h) => {
     const ic = h.cancelled || h.inFlux ? svg('stop', 'h-ic off') : h.ok ? svg('check', 'h-ic ok') : svg('x', 'h-ic bad');
-    const title = h.cancelled ? 'Stopped' : h.inFlux ? 'Files were still changing, retried later'
+    const title = h.cancelled ? 'Stopped' : h.interrupted ? 'The computer went to sleep, retried later' : h.inFlux ? 'Files were still changing, retried later'
       : !h.ok ? 'Sync failed' : h.transfers ? `Synced ${plural(h.transfers, 'file')}` : 'Checked, nothing to change';
     const versions = [...new Set(h.items.map((i) => i.item.split('/')[0]))].map(flavorName).join(', ');
     const err = !h.ok && !h.cancelled && !h.inFlux ? h.items.find((i) => !i.ok)?.error : '';

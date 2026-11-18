@@ -1,5 +1,5 @@
 // Leyline main process: tray icon, window, start at login, and the sync runner.
-import { app, BrowserWindow, Tray, Menu, ipcMain, dialog, nativeImage, Notification, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, Tray, Menu, ipcMain, dialog, nativeImage, Notification, nativeTheme, powerMonitor, powerSaveBlocker, shell } from 'electron';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -261,8 +261,15 @@ async function startSync(trigger = 'manual', { onlyFlavors, force = false } = {}
     return;
   }
   syncRunning = true;
-  try { await runSync(trigger, { onlyFlavors, force }); } finally { syncRunning = false; }
+  sleptDuringSync = false;
+  // Keep the computer awake until this sync is done. A laptop that dozes off in the middle
+  // (macOS wakes briefly for maintenance and sleeps again) leaves the NAS connection hanging.
+  const awake = powerSaveBlocker.start('prevent-app-suspension');
+  try { await runSync(trigger, { onlyFlavors, force }); } finally { syncRunning = false; powerSaveBlocker.stop(awake); }
 }
+
+let sleptDuringSync = false;
+app.whenReady().then(() => powerMonitor.on('suspend', () => { if (syncRunning) sleptDuringSync = true; }));
 
 async function runSync(trigger, { onlyFlavors, force }) {
   // Never sync a game version while it is running: WoW rewrites its files on logout.
@@ -371,7 +378,9 @@ async function runSync(trigger, { onlyFlavors, force }) {
     const failed = r.results.filter((x) => !x.ok);
     // Files changed while we copied them (an addon manager at work): not an error, just try
     // again once the folder has been quiet for a while.
-    summary.inFlux = !r.ok && !r.cancelled && failed.length > 0 && failed.every((x) => x.inFlux);
+    // the computer went to sleep during the sync: not an error, the connection just broke; try again
+    summary.interrupted = !r.ok && !r.cancelled && failed.length > 0 && sleptDuringSync;
+    summary.inFlux = summary.interrupted || (!r.ok && !r.cancelled && failed.length > 0 && failed.every((x) => x.inFlux));
     history = await store.addHistory(summary);
     if (r.ok) { state.status = 'idle'; state.lastSync = summary.time; }
     else if (r.cancelled) state.status = 'idle';

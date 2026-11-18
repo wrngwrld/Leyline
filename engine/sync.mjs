@@ -272,7 +272,7 @@ export class SyncEngine {
       p.stdout.on('data', onData);
       p.stderr.on('data', onData);
       p.on('error', reject);
-      p.on('close', (code) => { if (this.child === p) this.child = null; resolve({ code, logs, stats, ms: Date.now() - started }); });
+      p.on('close', (code, signal) => { if (this.child === p) this.child = null; resolve({ code, signal, logs, stats, ms: Date.now() - started }); });
       p.stdin.end();
     });
   }
@@ -389,6 +389,8 @@ export class SyncEngine {
       checks: s.checks ?? 0,
       errors: res.logs.filter((l) => l.level === 'error').map((l) => l.msg?.trim()).slice(0, 10),
     };
+    // always say why: the last thing rclone logged, or how it ended
+    if (!result.ok && !result.errors.length) result.errors = [res.logs.map((l) => (l.msg || '').trim()).filter(Boolean).pop() || (res.signal ? `rclone was stopped (${res.signal})` : `rclone exit ${res.code}`)];
     result.inFlux = !result.ok && isInFlux(result.errors);
     // A resync compares everything in one go and does not log single files; when it only
     // confirmed a copy just taken from the NAS, that copy's file list says what changed.
