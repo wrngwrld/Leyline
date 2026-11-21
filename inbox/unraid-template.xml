@@ -2,12 +2,12 @@
 <Container version="2">
   <Name>leyline-inbox</Name>
   <Repository>ghcr.io/wrngwrld/leyline-inbox:latest</Repository>
-  <Registry>https://github.com/wrngwrld/Leyline/pkgs/container/leyline-inbox</Registry>
+  <Registry>https://github.com/wrngwrld/leyline/pkgs/container/leyline-inbox</Registry>
   <Network>bridge</Network>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/wrngwrld/Leyline/issues</Support>
-  <Project>https://github.com/wrngwrld/Leyline</Project>
+  <Support>https://github.com/wrngwrld/leyline/issues</Support>
+  <Project>https://github.com/wrngwrld/leyline</Project>
   <Overview>Takes addon links from your phone and puts them in your Leyline wishlist. Part of Leyline, the WoW settings and addon sync. Keep it private: reach it through Tailscale, never forward its port to the internet.</Overview>
   <Category>Tools:</Category>
   <WebUI>http://[IP]:[PORT:8787]/</WebUI>
