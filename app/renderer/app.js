@@ -145,7 +145,9 @@ function scene() {
 
 // ---- pages ----------------------------------------------------------------
 
-const syncLabel = (p) => `${p.label[0].toUpperCase() + p.label.slice(1)}. Settings go first, so they are safe within seconds.`;
+const syncLabel = (p) => p.retry
+  ? `The connection to the NAS dropped. Leyline tries ${p.label} again in a moment.`
+  : `${p.label[0].toUpperCase() + p.label.slice(1)}. Settings go first, so they are safe within seconds.`;
 /**
  * Progress of the step that is running, by bytes (or files). Steps differ hugely in size
  * (settings are a few MB, addons gigabytes), so counting steps would mislead.
@@ -161,6 +163,7 @@ function syncPct(p) {
 function syncMeta(p) {
   const x = p.xfer;
   const step = `Step ${p.index || 1} of ${p.total || '…'}`;
+  if (p.retry) return [`${step} · try ${p.retry.attempt + 1} of ${p.retry.of + 1}`, ''];
   const speed = x?.speed ? `${bytes(x.speed)}/s` : '';
   // A normal sync knows exactly what it copies before it starts: count against that plan.
   const pl = p.plan;
@@ -513,18 +516,26 @@ function undoBtn(run, item, cs, can, what) {
 }
 
 /** The full error of a failed sync, per game version part, so it can be read and copied. */
+/** A note when steps only went through after the NAS connection dropped and came back. */
+function runRetryHtml(h) {
+  const parts = (h?.items || []).filter((i) => i.ok && i.retries);
+  if (!parts.length) return '';
+  const n = Math.max(...parts.map((i) => i.retries));
+  return `<div class="d-note">The connection to the NAS dropped during ${esc(parts.map((i) => partLabel(i.item)).join(', '))}. Leyline tried again ${n === 1 ? 'once' : `${n} times`} and it went through.</div>`;
+}
+
 function runErrorHtml(h) {
-  if (!h || h.ok || h.cancelled || h.inFlux) return '';
+  if (!h || h.ok || h.cancelled || h.inFlux) return runRetryHtml(h);
   const by = new Map(); // same error for several parts: show it once
   for (const i of h.items.filter((i) => !i.ok && i.error)) { if (!by.has(i.error)) by.set(i.error, []); by.get(i.error).push(partLabel(i.item)); }
-  if (!by.size) return '';
-  return `<div class="d-error">${[...by].map(([err, parts]) => `<div class="d-head">${esc(parts.join(', '))}</div><div class="d-errtext">${esc(err)}</div>`).join('')}</div>`;
+  if (!by.size) return runRetryHtml(h);
+  return `${runRetryHtml(h)}<div class="d-error">${[...by].map(([err, parts]) => `<div class="d-head">${esc(parts.join(', '))}</div><div class="d-errtext">${esc(err)}</div>`).join('')}</div>`;
 }
 
 function runDetailsHtml(run) {
   const summary = data.history.find((h) => h.run === run);
   const errHtml = runErrorHtml(summary);
-  const failed = !!errHtml;
+  const failed = errHtml.includes('class="d-error"');
   if (!runCache.has(run)) return `<div class="hdetail">${errHtml}<div class="d-note">Loading…</div></div>`;
   const d = runCache.get(run);
   if (!d) return `<div class="hdetail">${errHtml}${failed ? '' : '<div class="d-note">No file list for this sync. Leyline records which files changed from version 0.1.4 on.</div>'}</div>`;

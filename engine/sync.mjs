@@ -42,6 +42,21 @@ const IN_FLUX = /being updated|sizes differ|size changed|modtime changed|mod tim
 // bisync's summary lines that accompany any failure; they say nothing about the cause.
 const SUMMARY = /^(\x1b\[[0-9;]*m)?bisync (critical error|aborted)|^\x1b|errors? (occurred|during)|failed to bisync|out of sync/i;
 
+// rclone's wording when the connection to the NAS broke or could not be made.
+const NETWORK = /connection (reset|refused|error|timed out|aborted|lost|closed)|broken pipe|i\/o timeout|timed? ?out|no route to host|network is (unreachable|down)|host is down|unexpected EOF|use of closed network connection|dial tcp|failed to (connect|dial)|couldn't connect|session setup|STATUS_(NETWORK|CONNECTION|IO_TIMEOUT|USER_SESSION_DELETED)/i;
+
+/** True when the errors show the NAS connection broke (and nothing else went wrong). */
+export function isNetworkError(errors) {
+  const real = errors.filter((e) => e && !SUMMARY.test(e));
+  // bisync's summary line itself carries the cause ("Failed to bisync: connection error: …")
+  const all = real.length ? real : errors.filter(Boolean);
+  return all.length > 0 && all.some((e) => NETWORK.test(e)) && !all.some((e) => IN_FLUX.test(e) && !NETWORK.test(e));
+}
+
+// Waits before trying a step again after the connection broke: a NAS waking its disks or
+// restarting its SMB service, or Wi-Fi coming back, usually takes seconds to a minute.
+export const RETRY_DELAYS_MS = [5_000, 20_000, 60_000];
+
 /** True when every real error is "a file changed while copying", i.e. someone else is writing. */
 export function isInFlux(errors) {
   const real = errors.filter((e) => e && !SUMMARY.test(e));
@@ -233,7 +248,10 @@ export class SyncEngine {
   run(args) {
     const { rclone, rcloneConfig } = this.cfg;
     // Stats every 2 s drive the live progress (files/bytes done of total, speed, time left).
-    const full = [...args, '--use-json-log', '--log-level', 'INFO', '--stats', '2s', '--stats-log-level', 'NOTICE'];
+    // A connection that stops answering fails after 2 minutes instead of rclone's default 5,
+    // so the retry below gets a chance; 30 s is plenty to connect to a NAS on the same network.
+    const full = [...args, '--use-json-log', '--log-level', 'INFO', '--stats', '2s', '--stats-log-level', 'NOTICE',
+      '--timeout', this.cfg.ioTimeout || '2m', '--contimeout', this.cfg.connectTimeout || '30s'];
     if (rcloneConfig) full.push('--config', rcloneConfig);
     const started = Date.now();
     return new Promise((resolve, reject) => {
@@ -277,8 +295,36 @@ export class SyncEngine {
     });
   }
 
-  /** Two-way sync of one item. */
-  async syncItem(item, { forceResync = false } = {}) {
+  /**
+   * Two-way sync of one item. When the connection to the NAS breaks, wait and try again:
+   * bisync's --recover makes a second run after an interrupted one safe.
+   */
+  async syncItem(item, opts = {}) {
+    const delays = this.cfg.retryDelays || RETRY_DELAYS_MS;
+    const tried = [];
+    for (let attempt = 0; ; attempt++) {
+      const result = await this.syncItemOnce(item, opts);
+      if (result.ok || this.cancelled || !isNetworkError(result.errors || []) || attempt >= delays.length) {
+        if (tried.length) result.retries = tried;
+        if (!result.ok && isNetworkError(result.errors || [])) result.network = true;
+        return result;
+      }
+      tried.push(result.errors.find((e) => NETWORK.test(e)) || result.errors[0]);
+      this.emit({ type: 'item-retry', item: item.name, attempt: attempt + 1, of: delays.length, delayMs: delays[attempt], error: tried.at(-1) });
+      await this.wait(delays[attempt]);
+      if (this.cancelled) return { ...result, retries: tried };
+    }
+  }
+
+  /** Wait, or stop waiting when the sync is cancelled. */
+  wait(ms) {
+    return new Promise((resolve) => {
+      const t = setTimeout(() => { this.wakeWait = null; resolve(); }, ms);
+      this.wakeWait = () => { clearTimeout(t); this.wakeWait = null; resolve(); };
+    });
+  }
+
+  async syncItemOnce(item, { forceResync = false } = {}) {
     const { remoteRoot, stateDir, machine } = this.cfg;
     const remote = joinRemote(remoteRoot, 'current', item.name);
     const runStamp = this.runStamp;
@@ -291,6 +337,7 @@ export class SyncEngine {
     if (mk.code !== 0) {
       const result = { item: item.name, ok: false, code: mk.code, resync: false, ms: mk.ms, transfers: 0, bytes: 0, deletes: 0, checks: 0,
         errors: mk.logs.filter((l) => l.level === 'error').map((l) => l.msg?.trim()) };
+      if (!result.errors.length) result.errors = [mk.logs.map((l) => (l.msg || '').trim()).filter(Boolean).pop() || `rclone exit ${mk.code}`];
       this.emit({ type: 'item-done', ...result });
       return result;
     }
@@ -366,7 +413,7 @@ export class SyncEngine {
     const churn = isInFlux(res.logs.filter((l) => l.level === 'error').map((l) => l.msg?.trim()));
     if (res.code !== 0 && !resync && needsResync && !churn && !this.cancelled) {
       this.emit({ type: 'item-resync', item: item.name });
-      return this.syncItem(item, { forceResync: true });
+      return this.syncItemOnce(item, { forceResync: true });
     }
 
     if (res.code === 0) {
@@ -422,9 +469,17 @@ export class SyncEngine {
       (!only.parts || only.parts.includes(i.name.split('/').pop())));
     this.cancelled = false;
     const results = [];
+    let down = null; // the NAS stayed unreachable through every retry: don't try the rest
     for (const item of items) {
       if (this.cancelled) break;
-      results.push(await this.syncItem(item));
+      if (down) {
+        results.push({ item: item.name, ok: false, skipped: true, network: true, code: null, resync: false, ms: 0, transfers: 0, bytes: 0, deletes: 0, checks: 0,
+          errors: [`Not synced: the connection to the NAS kept failing (${down})`], changesKnown: false, changes: [], changeCount: 0 });
+        continue;
+      }
+      const r = await this.syncItem(item);
+      results.push(r);
+      if (r.network && r.retries?.length) down = r.errors.find((e) => NETWORK.test(e)) || r.errors[0];
     }
     const ok = !this.cancelled && results.every((r) => r.ok);
     return { ok, cancelled: !!this.cancelled, ms: results.reduce((a, r) => a + r.ms, 0), results, runStamp: this.runStamp };
@@ -708,6 +763,7 @@ export class SyncEngine {
   cancel() {
     this.cancelled = true;
     if (this.child) this.child.kill('SIGTERM');
+    this.wakeWait?.();
   }
 
   // ---- in-use marker (one per game version) --------------------------------

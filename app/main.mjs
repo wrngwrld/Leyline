@@ -343,6 +343,10 @@ async function runSync(trigger, { onlyFlavors, force }) {
           // exact totals for this step, fixed before copying starts
           state.progress.plan = { files: e.files, bytes: e.bytes, doneFiles: e.doneFiles, doneBytes: e.doneBytes };
           broadcast();
+        } else if (e.type === 'item-retry' && state.progress) {
+          // the NAS connection dropped: the engine waits, then tries this step again
+          state.progress.retry = { attempt: e.attempt, of: e.of };
+          broadcast();
         } else if (e.type === 'file') {
           state.progress.files++;
         } else if (e.type === 'stats' && state.progress) {
@@ -403,7 +407,7 @@ async function runSync(trigger, { onlyFlavors, force }) {
       ms: r.ms,
       transfers: r.results.reduce((a, x) => a + x.transfers, 0),
       bytes: r.results.reduce((a, x) => a + x.bytes, 0),
-      items: r.results.map((x) => ({ item: x.item, ok: x.ok, inFlux: x.inFlux, transfers: x.transfers, deletes: x.deletes, ms: x.ms, error: x.errors[0], changes: x.changesKnown ? x.changeCount : null })),
+      items: r.results.map((x) => ({ item: x.item, ok: x.ok, inFlux: x.inFlux, retries: x.retries?.length || undefined, skipped: x.skipped || undefined, transfers: x.transfers, deletes: x.deletes, ms: x.ms, error: x.errors[0], changes: x.changesKnown ? x.changeCount : null })),
     };
     // which files changed, for the History details and restoring
     await store.saveRun(r.runStamp, {
