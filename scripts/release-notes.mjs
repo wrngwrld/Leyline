@@ -25,9 +25,10 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
+  ['Retry syncs cut off by sleep and wait until the computer is awake', []],
   ['Show the full error of a failed sync in History', ['Improvements', 'Open a failed sync in History to read its full error message and copy it, for each game version that failed.']],
   ['Wishlist page: app icon, home screen manifest, gradient behind the status bar', ['Improvements', 'The phone page for adding addons now has an app icon and works as a home-screen app on your phone (update the inbox container to get it).']],
-  ['Keep the computer awake while a sync runs', [['Fixes', 'Syncs no longer hang for half an hour and fail when a laptop dozes off in the middle: Leyline keeps the computer awake until the sync is done, and if it slept anyway the sync is simply retried.'], ['Fixes', 'A failed sync now always shows the reason, instead of an empty message.']]],
+  ['Keep the computer awake while a sync runs', [['Fixes', 'Syncs no longer fail when a closed laptop wakes for a moment and dozes off again: Leyline keeps the computer awake while it syncs, waits a few minutes after waking before it syncs in the background, and simply retries a sync that sleep cut off.'], ['Fixes', 'A failed sync now always shows the reason, instead of an empty message.']]],
   ['Simplify the wishlist to a plain list', ['Improvements', 'The Wishlist is now a plain list: each addon has one button to install or open it, and Remove when you are done.']],
   ['Add an addon to the wishlist by name', ['Features', 'Wishlist: type an addon name instead of a link. Leyline searches CurseForge and you pick the right result; names sent from your phone wait as Name only until you press Find it.']],
   ['Add addons from your phone with the Leyline inbox', ['Features', 'Add addons to your wishlist from your phone: an optional small server next to your NAS takes links from a phone page or the iOS Share sheet, over Tailscale, and Leyline adds them the next time you open the Wishlist.']],
@@ -101,7 +102,8 @@ const groups = { Features: [], Improvements: [], Fixes: [], 'Security & privacy'
 for (const commit of commits) {
   const known = curated.get(commit.subject);
   if (known) {
-    for (const [group, text] of Array.isArray(known[0]) ? known : [known]) groups[group].push(text);
+    // [] marks a commit whose change another entry already describes
+    for (const [group, text] of known.length && !Array.isArray(known[0]) ? [known] : known) groups[group].push(text);
   } else if (!internal.test(commit.subject)) {
     groups[classify(commit.subject)].push(commit.subject.replace(/^(feat|fix|docs|refactor|perf|chore)(\([^)]*\))?:\s*/i, ''));
   }

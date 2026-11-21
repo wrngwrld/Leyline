@@ -253,17 +253,52 @@ let queuedTrigger = null;
 // and run side by side, and the first to finish would pull the engine from under the other.
 let syncRunning = false;
 
+// ---- sleep detection ------------------------------------------------------
+// macOS often wakes a closed laptop for a few seconds (a "dark wake") and puts it back to
+// sleep regardless of Leyline's keep-awake request, and without a 'suspend' event. A sync
+// that starts or runs then breaks its NAS connection. Sleep shows as the wall clock jumping
+// ahead of the monotonic clock (which stops while asleep), or as a timer firing far too late.
+const SLEEP_GAP_MS = 10_000;
+const WAKE_SETTLE_MS = 3 * 60_000; // dark wakes last up to 3 minutes
+let lastWall = Date.now(), lastMono = performance.now(), lastWake = 0;
+
+/** Note a sleep that ended since the last check. Returns true if there was one. */
+function checkSleep() {
+  const wall = Date.now(), mono = performance.now();
+  const dWall = wall - lastWall, dMono = mono - lastMono;
+  lastWall = wall; lastMono = mono;
+  const slept = dWall - dMono > SLEEP_GAP_MS || dWall > 60_000;
+  if (slept) { lastWake = wall; if (syncRunning) sleptDuringSync = true; }
+  return slept;
+}
+setInterval(checkSleep, 5000);
+
+// Background syncs wait until the computer has been awake for a while, so they do not run
+// in a dark wake. The timer stops while asleep, so after a dark wake it simply waits again.
+let deferTimer = null;
+function deferAfterWake(trigger, opts) {
+  checkSleep();
+  const left = lastWake + WAKE_SETTLE_MS - Date.now();
+  if (left <= 0) return false;
+  clearTimeout(deferTimer);
+  deferTimer = setTimeout(() => { deferTimer = null; startSync(trigger, opts); }, left + 1000);
+  return true;
+}
+
 async function startSync(trigger = 'manual', { onlyFlavors, force = false } = {}) {
   if (!isConfigured()) return;
+  if ((trigger === 'auto' || trigger === 'startup') && !syncRunning && deferAfterWake(trigger, { onlyFlavors, force })) return;
   if (syncRunning || state.status === 'syncing') {
     for (const f of onlyFlavors || settings.flavors.filter((x) => x.enabled).map((x) => x.id)) queued.add(f);
     queuedTrigger = trigger;
     return;
   }
   syncRunning = true;
+  checkSleep();
   sleptDuringSync = false;
   // Keep the computer awake until this sync is done. A laptop that dozes off in the middle
   // (macOS wakes briefly for maintenance and sleeps again) leaves the NAS connection hanging.
+  // It does not stop macOS from sleeping again after a dark wake; checkSleep catches that.
   const awake = powerSaveBlocker.start('prevent-app-suspension');
   try { await runSync(trigger, { onlyFlavors, force }); } finally { syncRunning = false; powerSaveBlocker.stop(awake); }
 }
@@ -379,12 +414,18 @@ async function runSync(trigger, { onlyFlavors, force }) {
     // Files changed while we copied them (an addon manager at work): not an error, just try
     // again once the folder has been quiet for a while.
     // the computer went to sleep during the sync: not an error, the connection just broke; try again
+    checkSleep(); // the error can arrive right after waking, before the next check
     summary.interrupted = !r.ok && !r.cancelled && failed.length > 0 && sleptDuringSync;
     summary.inFlux = summary.interrupted || (!r.ok && !r.cancelled && failed.length > 0 && failed.every((x) => x.inFlux));
     history = await store.addHistory(summary);
     if (r.ok) { state.status = 'idle'; state.lastSync = summary.time; }
     else if (r.cancelled) state.status = 'idle';
-    else if (summary.inFlux) {
+    else if (summary.interrupted) {
+      // try again once the computer is properly awake (deferred like a background sync)
+      state.status = 'idle';
+      const again = [...new Set(failed.map((x) => x.item.split('/')[0]))];
+      setTimeout(() => startSync('auto', { onlyFlavors: again }), 1500);
+    } else if (summary.inFlux) {
       state.status = 'idle';
       for (const f of new Set(failed.map((x) => x.item.split('/')[0]))) watcher.touch(f);
     } else {
