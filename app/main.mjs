@@ -306,6 +306,8 @@ async function startSync(trigger = 'manual', { onlyFlavors, force = false } = {}
 let sleptDuringSync = false;
 app.whenReady().then(() => powerMonitor.on('suspend', () => { if (syncRunning) sleptDuringSync = true; }));
 
+let lastThrown = null; // message of the last sync that stopped with an exception
+
 async function runSync(trigger, { onlyFlavors, force }) {
   // Never sync a game version while it is running: WoW rewrites its files on logout.
   const playing = await runningFlavors();
@@ -332,6 +334,7 @@ async function runSync(trigger, { onlyFlavors, force }) {
       flavors,
       env,
       force,
+      appVersion: app.getVersion(),
       onEvent: (e) => {
         if (e.type === 'item-start') {
           const items = engine.cfg.items;
@@ -422,6 +425,7 @@ async function runSync(trigger, { onlyFlavors, force }) {
     summary.interrupted = !r.ok && !r.cancelled && failed.length > 0 && sleptDuringSync;
     summary.inFlux = summary.interrupted || (!r.ok && !r.cancelled && failed.length > 0 && failed.every((x) => x.inFlux));
     history = await store.addHistory(summary);
+    lastThrown = null;
     if (r.ok) { state.status = 'idle'; state.lastSync = summary.time; }
     else if (r.cancelled) state.status = 'idle';
     else if (summary.interrupted) {
@@ -446,9 +450,12 @@ async function runSync(trigger, { onlyFlavors, force }) {
     if (forgot) await store.saveSettings(settings);
     await housekeeping(engine, r.results.some((x) => x.transfers || x.deletes));
   } catch (err) {
+    // the same problem on every background sync (a NAS set up by a newer Leyline): say it once
+    const again = lastThrown === err.message;
+    lastThrown = err.message;
     state.status = 'error';
     state.lastError = err.message;
-    notify('Leyline could not sync', err.message);
+    if (!again) notify(err.name === 'NasFormatError' ? 'Update Leyline to keep syncing' : 'Leyline could not sync', err.message);
   } finally {
     if (busy) { clearInterval(busy.timer); busy.engine.clearBusy(settings.machineId).catch(() => {}); }
     engine = null;
@@ -1049,6 +1056,13 @@ app.whenReady().then(async () => {
   settings = await store.loadSettings();
   if (!settings.flavors.length) { settings.wowRoot = await findWowRoot(); await store.saveSettings(settings); }
   history = await store.loadHistory();
+  // a settings or history file that could not be read: say what Leyline did about it
+  for (const r of store.recoveries) {
+    const what = r.name === 'settings.json' ? 'settings' : 'sync history';
+    notify(`Leyline could not read its ${what}`, r.how === 'backup'
+      ? `It used the copy from before the last change instead. The unreadable file was kept as ${path.basename(r.brokenFile)}.`
+      : `It started with ${r.name === 'settings.json' ? 'default settings' : 'an empty history'}. The unreadable file was kept as ${path.basename(r.brokenFile)}.`);
+  }
   state.lastSync = history.find((h) => h.ok)?.time || null;
   await refreshDetected();
   applyLoginItem();

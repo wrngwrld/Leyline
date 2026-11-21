@@ -25,6 +25,10 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
+  ['Keep settings, history and the NAS readable across updates', [
+    ['Fixes', 'If Leyline\'s settings or history file gets damaged (a crash or a full disk), it no longer starts over with empty settings: it uses the copy from before the last change, keeps the damaged file, and tells you.'],
+    ['Improvements', 'Safer updates across your computers: if a future Leyline changes how files are stored on the NAS, computers that have not updated yet stop syncing and ask for an update instead of mixing old and new.'],
+  ]],
   ['Run engine tests in CI and before each release', []],
   ['Retry a sync step when the NAS connection drops', ['Fixes', 'A short drop in the connection to your NAS (Wi-Fi blip, NAS waking up or restarting) no longer fails the sync: Leyline waits and tries that step again, up to three times. If the NAS stays unreachable, the remaining steps wait for the next sync instead of each failing on its own.']],
   ['Retry syncs cut off by sleep and wait until the computer is awake', ['Fixes', 'Syncs no longer fail when a closed Mac wakes for a moment and dozes off again: background syncs now wait until the computer has been awake for a few minutes, and a sync that sleep cut off is retried instead of reported as failed.']],

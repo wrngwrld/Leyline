@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SyncEngine } from '../engine/sync.mjs';
+import { SyncEngine, NAS_FORMAT, NasFormatError } from '../engine/sync.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RCLONE = path.join(ROOT, 'vendor', 'rclone', `${process.platform}-${process.arch}`, process.platform === 'win32' ? 'rclone.exe' : 'rclone');
@@ -108,4 +108,58 @@ test('a file replaced by a sync can be restored from its backup', { skip }, asyn
   await sync('mac');
   await sync('pc');
   assert.equal(await local('pc', 'WeakAuras/WeakAuras.lua'), 'pc only');
+});
+
+test('the NAS gets a format marker on the first sync', { skip }, async () => {
+  const marker = JSON.parse(await get('nas', 'format.json'));
+  assert.equal(marker.format, NAS_FORMAT);
+});
+
+test('a NAS set up by a newer Leyline is left alone', { skip }, async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'leyline-newer-'));
+  const nasRoot = path.join(dir, 'nas');
+  await mkdir(path.join(nasRoot, 'current', '_retail_', 'AddOns'), { recursive: true });
+  await writeFile(path.join(nasRoot, 'format.json'), JSON.stringify({ format: NAS_FORMAT + 1 }));
+  await writeFile(path.join(nasRoot, 'current', '_retail_', 'AddOns', 'new-layout.txt'), 'from the future');
+  await mkdir(path.join(dir, 'local'), { recursive: true });
+  await writeFile(path.join(dir, 'local', 'mine.lua'), 'mine');
+  const e = new SyncEngine({
+    rclone: RCLONE, remoteRoot: nasRoot, machine: 'old', stateDir: path.join(dir, 'state'),
+    items: [{ name: '_retail_/AddOns', flavor: '_retail_', local: path.join(dir, 'local') }], retryDelays: [],
+  });
+  await assert.rejects(e.syncAll(), (err) => err instanceof NasFormatError && /Update Leyline/.test(err.message));
+  assert.equal(existsSync(path.join(nasRoot, 'current', '_retail_', 'AddOns', 'mine.lua')), false);
+  assert.equal(existsSync(path.join(dir, 'local', 'new-layout.txt')), false);
+  assert.equal(JSON.parse(await readFile(path.join(nasRoot, 'format.json'), 'utf8')).format, NAS_FORMAT + 1);
+});
+
+test('a NAS synced by 0.1.25 (no marker) keeps syncing and gets the marker', { skip }, async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'leyline-old-'));
+  const nasRoot = path.join(dir, 'nas');
+  const old = path.join(nasRoot, 'current', '_retail_', 'AddOns', 'Old');
+  await mkdir(old, { recursive: true });
+  await writeFile(path.join(old, 'Old.toc'), 'from 0.1.25');
+  await mkdir(path.join(nasRoot, 'machines'), { recursive: true });
+  await writeFile(path.join(nasRoot, 'machines', 'pc.json'), JSON.stringify({ id: 'pc', name: 'PC', platform: 'win32', version: '0.1.25', lastSync: null, seen: new Date().toISOString(), playing: [], flavors: ['_retail_'] }) + '\n');
+  const e = new SyncEngine({
+    rclone: RCLONE, remoteRoot: nasRoot, machine: 'mac', stateDir: path.join(dir, 'state'),
+    items: [{ name: '_retail_/AddOns', flavor: '_retail_', local: path.join(dir, 'local') }], retryDelays: [],
+  });
+  const r = await e.syncAll();
+  assert.equal(r.ok, true);
+  assert.equal(await readFile(path.join(dir, 'local', 'Old', 'Old.toc'), 'utf8'), 'from 0.1.25');
+  assert.equal(JSON.parse(await readFile(path.join(nasRoot, 'format.json'), 'utf8')).format, NAS_FORMAT);
+  assert.deepEqual((await e.listMachines()).map((m) => m.id), ['pc']);
+});
+
+test('a brand-new NAS folder gets the marker after its first sync', { skip }, async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'leyline-fresh-'));
+  await mkdir(path.join(dir, 'local'), { recursive: true });
+  await writeFile(path.join(dir, 'local', 'a.lua'), 'a');
+  const e = new SyncEngine({
+    rclone: RCLONE, remoteRoot: path.join(dir, 'nas'), machine: 'mac', stateDir: path.join(dir, 'state'),
+    items: [{ name: '_retail_/AddOns', flavor: '_retail_', local: path.join(dir, 'local') }], retryDelays: [],
+  });
+  assert.equal((await e.syncAll()).ok, true);
+  assert.equal(JSON.parse(await readFile(path.join(dir, 'nas', 'format.json'), 'utf8')).format, NAS_FORMAT);
 });

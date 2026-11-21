@@ -75,6 +75,23 @@ export function stampTime(name) {
   return m ? new Date(`${m[1]}T${m[2]}:${m[3]}:${m[4]}Z`) : null;
 }
 
+// Layout of the Leyline folder on the NAS (current/, history/, machines/, busy/, locks/,
+// wishlist/, inbox/). <NAS folder>/format.json says which layout it uses. Bump NAS_FORMAT
+// only for a change older computers would get wrong (moving or renaming folders, changing
+// what a file means): from then on, computers with an older Leyline stop syncing and ask
+// for an update instead of writing the old layout into the new one. Adding a new folder or
+// a new field that older versions can ignore does not need a bump.
+// Leyline 0.1.25 and earlier wrote format 1 without the marker.
+export const NAS_FORMAT = 1;
+
+export class NasFormatError extends Error {
+  constructor(found) {
+    super(`Your NAS was last set up by a newer Leyline (NAS format ${found}, this one knows up to ${NAS_FORMAT}). Update Leyline on this computer to keep syncing; nothing was changed.`);
+    this.name = 'NasFormatError';
+    this.found = found;
+  }
+}
+
 const MAX_CHANGES = 5000; // per item; addon updates can touch tens of thousands of files
 const ANSI = /\x1b\[[0-9;]*m/g;
 const slash = (p) => p.replace(/\\/g, '/');
@@ -461,7 +478,35 @@ export class SyncEngine {
    * Sync items in order (settings first).
    * @param {{flavors?:string[], parts?:string[]}} [only]  limit to some game versions / parts
    */
+  /**
+   * Check the NAS layout before syncing. Writes the marker when there is none yet; throws
+   * NasFormatError when a newer Leyline set up the NAS. Returns false when the NAS could not
+   * be read (the sync then reports that on its own).
+   */
+  async checkNasFormat() {
+    const file = joinRemote(this.cfg.remoteRoot, 'format.json');
+    const ls = await this.raw(['lsjson', this.cfg.remoteRoot, '--files-only', '--include', '/format.json']);
+    if (ls.code !== 0) return false; // unreachable, or the folder does not exist yet
+    let list = [];
+    try { list = JSON.parse(ls.out); } catch { return false; }
+    if (list.length) {
+      const { code, out } = await this.raw(['cat', file]);
+      if (code !== 0) return false;
+      let found = null;
+      try { found = JSON.parse(out).format; } catch {}
+      // a marker this version cannot make sense of is left alone, but does not block syncing
+      if (!Number.isInteger(found)) return true;
+      if (found > NAS_FORMAT) throw new NasFormatError(found);
+      if (found === NAS_FORMAT) return true;
+      // found < NAS_FORMAT: once there is a format 2, move the old layout over here first
+    }
+    const body = JSON.stringify({ format: NAS_FORMAT, written: new Date().toISOString(), by: this.cfg.appVersion || null }) + '\n';
+    await this.raw(['rcat', file], body);
+    return true;
+  }
+
   async syncAll(only = {}) {
+    const formatKnown = await this.checkNasFormat();
     await this.prepare();
     this.runStamp = stamp();
     const items = this.cfg.items.filter((i) =>
@@ -481,6 +526,8 @@ export class SyncEngine {
       results.push(r);
       if (r.network && r.retries?.length) down = r.errors.find((e) => NETWORK.test(e)) || r.errors[0];
     }
+    // a NAS seen for the first time had no folder to put the marker in before the sync
+    if (!formatKnown && results.some((r) => r.ok)) await this.checkNasFormat().catch(() => {});
     const ok = !this.cancelled && results.every((r) => r.ok);
     return { ok, cancelled: !!this.cancelled, ms: results.reduce((a, r) => a + r.ms, 0), results, runStamp: this.runStamp };
   }

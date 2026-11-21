@@ -1,0 +1,67 @@
+[
+  {
+    "time": "2026-11-21T16:26:43.155Z",
+    "run": "2026-11-21T16-26-43",
+    "trigger": "auto",
+    "ok": false,
+    "cancelled": false,
+    "ms": 488822,
+    "transfers": 0,
+    "bytes": 0,
+    "items": [
+      {
+        "item": "_retail_/Account",
+        "ok": true,
+        "inFlux": false,
+        "transfers": 0,
+        "deletes": 0,
+        "ms": 733,
+        "changes": 0
+      },
+      {
+        "item": "_classic_era_/AddOns",
+        "ok": false,
+        "inFlux": false,
+        "transfers": 0,
+        "deletes": 0,
+        "ms": 478845,
+        "error": "Failed to bisync: connection error: read tcp 192.168.1.2:58421->192.168.1.10:445: read: connection reset by peer",
+        "changes": 0
+      }
+    ],
+    "interrupted": false,
+    "inFlux": false
+  },
+  {
+    "time": "2026-11-21T18:27:06.449Z",
+    "run": "2026-11-21T18-27-06",
+    "trigger": "auto",
+    "ok": true,
+    "cancelled": false,
+    "ms": 10129,
+    "transfers": 0,
+    "bytes": 0,
+    "items": [
+      {
+        "item": "_retail_/Account",
+        "ok": true,
+        "inFlux": false,
+        "transfers": 0,
+        "deletes": 0,
+        "ms": 698,
+        "changes": 0
+      },
+      {
+        "item": "_retail_/SavedVariables",
+        "ok": true,
+        "inFlux": false,
+        "transfers": 0,
+        "deletes": 0,
+        "ms": 187,
+        "changes": 0
+      }
+    ],
+    "interrupted": false,
+    "inFlux": false
+  }
+]

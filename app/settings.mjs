@@ -2,7 +2,8 @@
 // The NAS password is encrypted with Electron safeStorage (backed by the macOS Keychain /
 // Windows DPAPI), so the settings file never holds it in readable form.
 import { app, safeStorage } from 'electron';
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { SETTINGS_VERSION, migrateSettings, readJsonSafe, writeJsonSafe } from './settings-format.mjs';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -27,22 +28,22 @@ export function defaults() {
   };
 }
 
+/** What happened to files that could not be read at startup, for the app to tell the user. */
+export const recoveries = [];
+
 async function readJson(name, fallback) {
-  try { return JSON.parse(await readFile(file(name), 'utf8')); } catch { return fallback; }
+  const r = await readJsonSafe(file(name), fallback);
+  if (r.recovered) recoveries.push({ name, how: r.recovered, brokenFile: r.brokenFile });
+  return r.data;
 }
 
-async function writeJson(name, data) {
-  await mkdir(dir(), { recursive: true });
-  const tmp = file(`${name}.tmp`);
-  await writeFile(tmp, JSON.stringify(data, null, 2));
-  await rename(tmp, file(name)); // atomic replace: a crash never leaves half a file
-}
+const writeJson = (name, data) => writeJsonSafe(file(name), data);
 
 export async function loadSettings() {
-  const d = defaults();
-  const s = await readJson('settings.json', {});
-  const out = { ...d, ...s, nas: { ...d.nas, ...(s.nas || {}) } };
-  if (!out.machineId) { out.machineId = randomUUID(); await saveSettings(out); }
+  const { settings: out, migrated } = migrateSettings(await readJson('settings.json', {}), { ...defaults(), settingsVersion: SETTINGS_VERSION });
+  let save = migrated;
+  if (!out.machineId) { out.machineId = randomUUID(); save = true; }
+  if (save) await saveSettings(out);
   return out;
 }
 
@@ -81,7 +82,7 @@ export async function loadRun(run) {
 }
 
 const HISTORY_MAX = 200;
-export async function loadHistory() { return readJson('history.json', []); }
+export async function loadHistory() { const h = await readJson('history.json', []); return Array.isArray(h) ? h : []; }
 export async function addHistory(entry) {
   const h = await loadHistory();
   h.unshift(entry);

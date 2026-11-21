@@ -1,0 +1,52 @@
+{
+  "machine": "MacBookPro",
+  "wowRoot": "/Applications/World of Warcraft",
+  "flavors": [
+    {
+      "id": "_retail_",
+      "enabled": true,
+      "addons": true
+    },
+    {
+      "id": "_classic_",
+      "enabled": true,
+      "addons": true
+    },
+    {
+      "id": "_classic_beta_",
+      "enabled": false,
+      "addons": false
+    },
+    {
+      "id": "_classic_era_",
+      "enabled": true,
+      "addons": true
+    },
+    {
+      "id": "_anniversary_",
+      "enabled": true,
+      "addons": true
+    },
+    {
+      "id": "_forever_",
+      "enabled": true,
+      "addons": true,
+      "skip": {
+        "settings": []
+      }
+    }
+  ],
+  "nas": {
+    "host": "192.168.1.10",
+    "share": "leyline",
+    "folder": "",
+    "user": "player"
+  },
+  "passwordEnc": "ZmFrZS1lbmNyeXB0ZWQtcGFzc3dvcmQ=",
+  "startAtLogin": true,
+  "autoSync": true,
+  "syncIntervalMin": 10,
+  "keepHistoryDays": 30,
+  "machineId": "00000000-0000-4000-8000-000000000001",
+  "lastPrune": "2026-11-21T09:49:55.061Z"
+}

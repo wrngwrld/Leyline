@@ -1,0 +1,44 @@
+{
+  "run": "2026-11-16T10-11-18",
+  "machine": "MacBookPro",
+  "time": "2026-11-16T10:11:18.651Z",
+  "items": [
+    {
+      "item": "_forever_/Account",
+      "changesKnown": true,
+      "changeCount": 0,
+      "changes": []
+    },
+    {
+      "item": "_forever_/SavedVariables",
+      "changesKnown": true,
+      "changeCount": 0,
+      "changes": []
+    },
+    {
+      "item": "_forever_/AddOns",
+      "changesKnown": true,
+      "changeCount": 171,
+      "changes": [
+        {
+          "path": "BagBrother/BagBrother.toc",
+          "action": "updated",
+          "dir": "in",
+          "backup": "local"
+        },
+        {
+          "path": "BagBrother/art/achievement-guildperk-mobilebanking.tga",
+          "action": "updated",
+          "dir": "in",
+          "backup": "local"
+        },
+        {
+          "path": "BagBrother/art/bagbrother-plugin.tga",
+          "action": "updated",
+          "dir": "in",
+          "backup": "local"
+        }
+      ]
+    }
+  ]
+}
