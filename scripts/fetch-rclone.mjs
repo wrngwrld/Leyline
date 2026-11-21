@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Download a pinned rclone release into vendor/rclone/<platform>-<arch>/ and verify its checksum.
-// Usage: node scripts/fetch-rclone.mjs [darwin-arm64|darwin-x64|win32-x64|win32-arm64 ...]
+// Usage: node scripts/fetch-rclone.mjs [darwin-arm64|darwin-x64|win32-x64|win32-arm64|linux-x64 ...]
+// (linux-x64 is only for running the tests in CI; there is no Linux app)
 // With no arguments it fetches the binary for the current machine.
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, writeFile, copyFile, chmod, rm, readdir } from 'node:fs/promises';
@@ -16,6 +17,7 @@ const NAMES = {
   'darwin-x64': 'osx-amd64',
   'win32-x64': 'windows-amd64',
   'win32-arm64': 'windows-arm64',
+  'linux-x64': 'linux-amd64',
 };
 
 const targets = process.argv.slice(2);
@@ -44,8 +46,9 @@ for (const t of targets) {
   const tmp = await mkdtemp(path.join(os.tmpdir(), 'leyline-rclone-'));
   try {
     await writeFile(path.join(tmp, zipName), zip);
-    // bsdtar reads zip files and ships with macOS and Windows 10+.
-    execFileSync('tar', ['-xf', zipName], { cwd: tmp });
+    // bsdtar reads zip files and ships with macOS and Windows 10+; Linux has GNU tar, so unzip.
+    if (process.platform === 'linux') execFileSync('unzip', ['-q', zipName], { cwd: tmp });
+    else execFileSync('tar', ['-xf', zipName], { cwd: tmp });
     const dir = (await readdir(tmp)).find((d) => d.startsWith('rclone-'));
     const exe = t.startsWith('win32') ? 'rclone.exe' : 'rclone';
     const outDir = path.join(ROOT, 'vendor', 'rclone', t);

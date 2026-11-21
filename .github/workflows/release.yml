@@ -55,6 +55,9 @@ jobs:
             echo "::error::Tag v$VERSION already exists"; exit 1
           fi
 
+      - name: Run the tests
+        run: node scripts/fetch-rclone.mjs linux-x64 && npm test
+
       - name: Write release notes
         env:
           HIGHLIGHTS: ${{ inputs.highlights }}
