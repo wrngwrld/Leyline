@@ -512,10 +512,22 @@ function undoBtn(run, item, cs, can, what) {
   return restoreBtn({ run, item, paths: [...back, ...added].map((c) => c.path) }, label, title);
 }
 
+/** The full error of a failed sync, per game version part, so it can be read and copied. */
+function runErrorHtml(h) {
+  if (!h || h.ok || h.cancelled || h.inFlux) return '';
+  const by = new Map(); // same error for several parts: show it once
+  for (const i of h.items.filter((i) => !i.ok && i.error)) { if (!by.has(i.error)) by.set(i.error, []); by.get(i.error).push(partLabel(i.item)); }
+  if (!by.size) return '';
+  return `<div class="d-error">${[...by].map(([err, parts]) => `<div class="d-head">${esc(parts.join(', '))}</div><div class="d-errtext">${esc(err)}</div>`).join('')}</div>`;
+}
+
 function runDetailsHtml(run) {
-  if (!runCache.has(run)) return `<div class="hdetail"><div class="d-note">Loading…</div></div>`;
+  const summary = data.history.find((h) => h.run === run);
+  const errHtml = runErrorHtml(summary);
+  const failed = !!errHtml;
+  if (!runCache.has(run)) return `<div class="hdetail">${errHtml}<div class="d-note">Loading…</div></div>`;
   const d = runCache.get(run);
-  if (!d) return `<div class="hdetail"><div class="d-note">No file list for this sync. Leyline records which files changed from version 0.1.4 on.</div></div>`;
+  if (!d) return `<div class="hdetail">${errHtml}${failed ? '' : '<div class="d-note">No file list for this sync. Leyline records which files changed from version 0.1.4 on.</div>'}</div>`;
   const can = (c) => c.backup && d.backups[c.backup];
   // mark what was restored or removed from this sync already
   for (const it of d.items) { const u = new Set(d.undone?.[it.item] || []); for (const c of it.changes || []) c.done = u.has(c.path); }
@@ -524,7 +536,6 @@ function runDetailsHtml(run) {
   const allDone = all.length > 0 && all.every((c) => c.done);
   const lostBackups = all.some((c) => c.backup && !can(c));
   // how many files each part moved, from the History entry (also for syncs without a file list)
-  const summary = data.history.find((h) => h.run === run);
   const moved = (item) => summary?.items.find((i) => i.item === item)?.transfers || 0;
   const copiedNote = (n) => `It compared everything in one go and copied ${plural(n, 'file')} that one side did not have yet. New files are not listed one by one.`;
   const groups = d.items.filter((i) => !i.changesKnown || i.changes?.length || (i.fromBackups && moved(i.item))).map((it) => {
@@ -558,13 +569,13 @@ function runDetailsHtml(run) {
     const note = it.fromBackups ? `<div class="d-note">This sync compared everything in one go, so these are the files it replaced, taken from its backups${it.nasUnknown ? ' on this computer (the NAS could not be read just now)' : ''}. Files it added are not listed.</div>` : '';
     return `<div class="d-item"><div class="d-head">${esc(partLabel(it.item))}</div>${note}${dirs}${more}</div>`;
   }).join('');
-  if (!groups) return `<div class="hdetail"><div class="d-note">This sync did not change any files.</div></div>`;
+  if (!groups) return `<div class="hdetail">${errHtml}<div class="d-note">${failed ? 'It stopped before changing any files.' : 'This sync did not change any files.'}</div></div>`;
   const note = allDone ? 'Everything this sync changed has been undone.'
     : undoable
     ? 'Restore puts a file back to its version from before this sync, Remove deletes a file this sync added. Leyline then syncs that to your other computers, and keeps a copy of everything it replaces or removes.'
     : lostBackups ? 'The backups of this sync have been cleaned up, so it can no longer be undone.'
     : 'Nothing to undo here.';
-  return `<div class="hdetail">${groups}
+  return `<div class="hdetail">${errHtml}${groups}
     <div class="d-foot">
       <span class="d-note">${note}</span>
       <div class="d-actions">

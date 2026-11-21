@@ -25,6 +25,8 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
+  ['Show the full error of a failed sync in History', ['Improvements', 'Open a failed sync in History to read its full error message and copy it, for each game version that failed.']],
+  ['Wishlist page: app icon, home screen manifest, gradient behind the status bar', ['Improvements', 'The phone page for adding addons now has an app icon and works as a home-screen app on your phone (update the inbox container to get it).']],
   ['Keep the computer awake while a sync runs', [['Fixes', 'Syncs no longer hang for half an hour and fail when a laptop dozes off in the middle: Leyline keeps the computer awake until the sync is done, and if it slept anyway the sync is simply retried.'], ['Fixes', 'A failed sync now always shows the reason, instead of an empty message.']]],
   ['Simplify the wishlist to a plain list', ['Improvements', 'The Wishlist is now a plain list: each addon has one button to install or open it, and Remove when you are done.']],
   ['Add an addon to the wishlist by name', ['Features', 'Wishlist: type an addon name instead of a link. Leyline searches CurseForge and you pick the right result; names sent from your phone wait as Name only until you press Find it.']],
