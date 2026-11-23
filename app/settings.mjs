@@ -81,6 +81,14 @@ export async function loadRun(run) {
   try { return JSON.parse(await readFile(runFile(run), 'utf8')); } catch { return null; }
 }
 
+// Window size and position, kept apart from settings.json so moving the window never
+// rewrites the settings file.
+export async function loadWindowState() {
+  const r = await readJsonSafe(file('window.json'), null);
+  return r.data && typeof r.data === 'object' ? r.data : null;
+}
+export async function saveWindowState(s) { await writeJson('window.json', s); }
+
 const HISTORY_MAX = 200;
 export async function loadHistory() { const h = await readJson('history.json', []); return Array.isArray(h) ? h : []; }
 export async function addHistory(entry) {

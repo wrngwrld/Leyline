@@ -1,5 +1,5 @@
 // Leyline main process: tray icon, window, start at login, and the sync runner.
-import { app, BrowserWindow, Tray, Menu, ipcMain, dialog, nativeImage, Notification, nativeTheme, powerMonitor, powerSaveBlocker, shell } from 'electron';
+import { app, BrowserWindow, Tray, Menu, ipcMain, dialog, nativeImage, Notification, nativeTheme, powerMonitor, powerSaveBlocker, screen, shell } from 'electron';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -147,12 +147,43 @@ function createTray() {
 
 // ---- window -------------------------------------------------------------
 
+const WIN_DEFAULT = { width: 1040, height: 700 };
+const WIN_MIN = { width: 880, height: 600 };
+let windowState = null; // last saved size/position, loaded at startup
+
+/** The saved bounds, if they still fit on a connected screen; otherwise the default size, centred. */
+function restoredBounds() {
+  const s = windowState;
+  if (process.env.LEYLINE_SCREENSHOTS || !s || !(s.width > 0 && s.height > 0)) return { ...WIN_DEFAULT };
+  const b = { width: Math.max(WIN_MIN.width, Math.round(s.width)), height: Math.max(WIN_MIN.height, Math.round(s.height)) };
+  if (Number.isFinite(s.x) && Number.isFinite(s.y)) {
+    const area = screen.getDisplayMatching({ x: s.x, y: s.y, width: b.width, height: b.height }).workArea;
+    // keep the position only if a usable part of the title bar is on that screen
+    const visible = s.x + b.width - 100 > area.x && s.x + 100 < area.x + area.width && s.y >= area.y - 10 && s.y + 40 < area.y + area.height;
+    if (visible) { b.x = Math.round(s.x); b.y = Math.round(s.y); }
+    b.width = Math.min(b.width, Math.max(WIN_MIN.width, area.width));
+    b.height = Math.min(b.height, Math.max(WIN_MIN.height, area.height));
+  }
+  return b;
+}
+
+let saveWindowTimer = null;
+function rememberWindow(now = false) {
+  if (process.env.LEYLINE_SCREENSHOTS || !win || win.isDestroyed()) return;
+  clearTimeout(saveWindowTimer);
+  const save = () => {
+    if (!win || win.isDestroyed() || win.isMinimized()) return;
+    windowState = { ...win.getNormalBounds(), maximized: win.isMaximized() };
+    store.saveWindowState(windowState).catch(() => {});
+  };
+  if (now) save(); else saveWindowTimer = setTimeout(save, 500);
+}
+
 function createWindow() {
   win = new BrowserWindow({
-    width: 1040,
-    height: 700,
-    minWidth: 880,
-    minHeight: 600,
+    ...restoredBounds(),
+    minWidth: WIN_MIN.width,
+    minHeight: WIN_MIN.height,
     show: false,
     title: 'Leyline',
     icon: isMac ? undefined : asset('icon.png'),
@@ -167,8 +198,12 @@ function createWindow() {
       sandbox: true,
     },
   });
+  // maximising a hidden window shows it on Windows, so wait until it is revealed
+  win.once('show', () => { if (windowState?.maximized && !process.env.LEYLINE_SCREENSHOTS) win.maximize(); });
+  for (const ev of ['resize', 'move', 'maximize', 'unmaximize']) win.on(ev, () => rememberWindow());
   win.loadFile(path.join(HERE, 'renderer', 'index.html'));
   win.on('close', (e) => {
+    rememberWindow(true);
     // Closing the window keeps Leyline running in the tray.
     if (!quitting) { e.preventDefault(); win.hide(); if (isMac) app.dock?.hide(); }
   });
@@ -1068,6 +1103,7 @@ app.whenReady().then(async () => {
   applyLoginItem();
   if (isMac) app.dock?.setIcon(asset('icon-512.png'));
   createTray();
+  windowState = await store.loadWindowState().catch(() => null);
   createWindow();
   initUpdater({
     changed: broadcast,
