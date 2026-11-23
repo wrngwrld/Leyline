@@ -1,7 +1,7 @@
 {
   "name": "leyline",
   "productName": "Leyline",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Keeps World of Warcraft settings and addons in sync between your computers through your own NAS.",
   "license": "MIT",
   "type": "module",
