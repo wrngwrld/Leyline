@@ -25,6 +25,7 @@ const commits = raw.split('\x1e').map((c) => c.trim()).filter(Boolean).map((c) =
 }).filter((c) => !/^Release v\d/.test(c.subject));
 
 const curated = new Map([
+  ['Remember the window size and position between launches', ['Fixes', 'The Leyline window now opens at the size and position you left it, and maximised if it was, instead of resetting every time. If that spot is no longer on a connected screen, it opens centred.']],
   ['Keep settings, history and the NAS readable across updates', [
     ['Fixes', 'If Leyline\'s settings or history file gets damaged (a crash or a full disk), it no longer starts over with empty settings: it uses the copy from before the last change, keeps the damaged file, and tells you.'],
     ['Improvements', 'Safer updates across your computers: if a future Leyline changes how files are stored on the NAS, computers that have not updated yet stop syncing and ask for an update instead of mixing old and new.'],
